@@ -3,8 +3,10 @@ from pathlib import Path
 # ── Paths ──────────────────────────────────────────────────────────────────────
 ROOT = Path(__file__).parent.parent
 DATA_RAW = ROOT / "data" / "raw"
+DATA_PROCESSED = ROOT / "data" / "processed"
 
 DATA_RAW.mkdir(parents=True, exist_ok=True)
+DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
 
 # ── MT5 ────────────────────────────────────────────────────────────────────────
 MT5_SYMBOL = "GBPUSD"
