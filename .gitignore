@@ -62,6 +62,8 @@ ipython_config.py
 
 # Environments
 .env
+.env.*
+!.env.example
 .venv
 env/
 venv/
