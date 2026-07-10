@@ -19,12 +19,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from config.settings import DATA_RAW, MT5_SYMBOL
+from config.settings import DATA_PROCESSED, DATA_RAW, MT5_SYMBOL
 
 app = FastAPI(title="trading-bot chart viewer")
 
 STATIC_DIR = Path(__file__).parent / "static"
 TIMEFRAMES = ["M15", "H1", "H4", "D1"]
+SOURCES = {"raw": DATA_RAW, "processed": DATA_PROCESSED}
 
 
 @app.get("/")
@@ -33,24 +34,29 @@ def index():
 
 
 @app.get("/api/timeframes")
-def list_timeframes():
+def list_timeframes(source: str = "raw"):
+    if source not in SOURCES:
+        raise HTTPException(400, f"Unknown source '{source}', expected one of {list(SOURCES)}")
+    base = SOURCES[source]
     available = [
-        tf for tf in TIMEFRAMES if (DATA_RAW / f"{MT5_SYMBOL}_{tf}.parquet").exists()
+        tf for tf in TIMEFRAMES if (base / f"{MT5_SYMBOL}_{tf}.parquet").exists()
     ]
     return {"symbol": MT5_SYMBOL, "timeframes": available}
 
 
 @app.get("/api/bars")
-def get_bars(tf: str = "M15"):
+def get_bars(tf: str = "M15", source: str = "raw"):
     if tf not in TIMEFRAMES:
         raise HTTPException(
             400, f"Unknown timeframe '{tf}', expected one of {TIMEFRAMES}"
         )
+    if source not in SOURCES:
+        raise HTTPException(400, f"Unknown source '{source}', expected one of {list(SOURCES)}")
 
-    path = DATA_RAW / f"{MT5_SYMBOL}_{tf}.parquet"
+    path = SOURCES[source] / f"{MT5_SYMBOL}_{tf}.parquet"
     if not path.exists():
         raise HTTPException(
-            404, f"No data for {MT5_SYMBOL} {tf}. Run data/pipeline.py first."
+            404, f"No data for {MT5_SYMBOL} {tf} in '{source}'. Run data/pipeline.py first."
         )
 
     df = pd.read_parquet(path)

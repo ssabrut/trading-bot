@@ -36,6 +36,12 @@
   .layout-opt:hover { background: #f0f3fa; }
   .layout-opt.active { background: #e8f0fe; border-color: #2962ff; }
 
+  #source-select {
+    background: #ffffff; color: #5d606b; border: 1px solid #d1d4dc;
+    border-radius: 4px; padding: 5px 10px; font-size: 13px; cursor: pointer;
+  }
+  #source-select:hover { background: #f0f3fa; color: #131722; }
+
   /* settings picker */
   #settings-wrap { position: relative; }
   #settings-btn {
@@ -80,6 +86,11 @@
       </button>
       <div id="layout-menu"></div>
     </div>
+
+    <select id="source-select" title="Data source">
+      <option value="raw">raw</option>
+      <option value="processed">processed</option>
+    </select>
 
     <div id="settings-wrap">
       <button id="settings-btn" title="Chart settings">
@@ -132,6 +143,7 @@
 
     let availableTfs = TIMEFRAMES;
     let currentLayout = "1x1";
+    let currentSource = localStorage.getItem("dataSource") || "raw";
     let cells = []; // { chart, series, tfSelect, statusEl, ro }
 
     const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5 };
@@ -327,7 +339,7 @@
       const tf = cell.tfSelect.value;
       cell.cellStatus.textContent = "loading…";
       try {
-        const res = await fetch(`/api/bars?tf=${tf}`);
+        const res = await fetch(`/api/bars?tf=${tf}&source=${currentSource}`);
         if (!res.ok) {
           const err = await res.json();
           cell.series.setData([]);
@@ -343,22 +355,37 @@
       }
     }
 
-    async function init() {
-      const res = await fetch("/api/timeframes");
+    async function loadTimeframesAndBuildGrid() {
+      const res = await fetch(`/api/timeframes?source=${currentSource}`);
       const info = await res.json();
       titleEl.textContent = info.symbol;
       availableTfs = info.timeframes.length > 0 ? info.timeframes : TIMEFRAMES;
-
-      buildLayoutMenu();
-      updateLayoutButtonIcon();
-      initSettingsPanel();
 
       if (info.timeframes.length > 0) {
         statusEl.textContent = "";
         buildGrid();
       } else {
-        statusEl.textContent = "no data yet — run data/pipeline.py";
+        destroyCells();
+        statusEl.textContent = `no ${currentSource} data yet — run data/pipeline.py`;
       }
+    }
+
+    function initSourceSelect() {
+      const sourceSelect = document.getElementById("source-select");
+      sourceSelect.value = currentSource;
+      sourceSelect.onchange = () => {
+        currentSource = sourceSelect.value;
+        localStorage.setItem("dataSource", currentSource);
+        loadTimeframesAndBuildGrid();
+      };
+    }
+
+    async function init() {
+      buildLayoutMenu();
+      updateLayoutButtonIcon();
+      initSettingsPanel();
+      initSourceSelect();
+      await loadTimeframesAndBuildGrid();
     }
 
     init();
