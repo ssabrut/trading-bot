@@ -65,7 +65,7 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
     ports:
-      - "5000:5000"
+      - "5001:5000"
     command: >
       mlflow server
       --host 0.0.0.0

@@ -1,0 +1,17 @@
+project: trading_bot
+provider: local
+registry:
+  registry_type: sql
+  path: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:5432/${POSTGRES_DB}
+online_store:
+  type: postgres
+  host: localhost
+  port: 5432
+  database: ${POSTGRES_DB}
+  db_schema: feast_online
+  user: ${POSTGRES_USER}
+  password: ${POSTGRES_PASSWORD}
+  sslmode: disable
+offline_store:
+  type: file
+entity_key_serialization_version: 3
