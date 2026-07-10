@@ -117,6 +117,10 @@
           <label>Price precision</label>
           <input type="number" id="set-precision" min="0" max="8" step="1" />
         </div>
+        <div class="setting-row">
+          <label>Swing points</label>
+          <input type="checkbox" id="set-swing-points" />
+        </div>
       </div>
     </div>
 
@@ -146,7 +150,7 @@
     let currentSource = localStorage.getItem("dataSource") || "raw";
     let cells = []; // { chart, series, tfSelect, statusEl, ro }
 
-    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5 };
+    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, swingPoints: false };
     let chartSettings = loadSettings();
 
     function loadSettings() {
@@ -186,11 +190,13 @@
       const downInput = document.getElementById("set-down-color");
       const gridInput = document.getElementById("set-grid-lines");
       const precisionInput = document.getElementById("set-precision");
+      const swingInput = document.getElementById("set-swing-points");
 
       upInput.value = chartSettings.upColor;
       downInput.value = chartSettings.downColor;
       gridInput.checked = chartSettings.gridLines;
       precisionInput.value = chartSettings.precision;
+      swingInput.checked = chartSettings.swingPoints;
 
       upInput.oninput = () => { chartSettings.upColor = upInput.value; saveSettings(); applySettingsToAllCells(); };
       downInput.oninput = () => { chartSettings.downColor = downInput.value; saveSettings(); applySettingsToAllCells(); };
@@ -201,6 +207,11 @@
         chartSettings.precision = v;
         saveSettings();
         applySettingsToAllCells();
+      };
+      swingInput.onchange = () => {
+        chartSettings.swingPoints = swingInput.checked;
+        saveSettings();
+        cells.forEach(loadSwingMarkers);
       };
 
       document.getElementById("settings-btn").onclick = (e) => {
@@ -350,8 +361,35 @@
         cell.series.setData(data.bars);
         cell.chart.timeScale().fitContent();
         cell.cellStatus.textContent = `${tf} · ${data.bars.length} bars`;
+        await loadSwingMarkers(cell);
       } catch (e) {
         cell.cellStatus.textContent = "failed to load";
+      }
+    }
+
+    async function loadSwingMarkers(cell) {
+      if (!chartSettings.swingPoints) {
+        cell.series.setMarkers([]);
+        return;
+      }
+      const tf = cell.tfSelect.value;
+      try {
+        const res = await fetch(`/api/swings?tf=${tf}`);
+        if (!res.ok) { cell.series.setMarkers([]); return; }
+        const data = await res.json();
+        const markers = [
+          ...data.highs.map(p => ({
+            time: p.time, position: "aboveBar", color: "#ef5350",
+            shape: "arrowDown", text: "H",
+          })),
+          ...data.lows.map(p => ({
+            time: p.time, position: "belowBar", color: "#26a69a",
+            shape: "arrowUp", text: "L",
+          })),
+        ].sort((a, b) => a.time - b.time);
+        cell.series.setMarkers(markers);
+      } catch (e) {
+        cell.series.setMarkers([]);
       }
     }
 
