@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>trading-bot chart</title>
+<script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+  html, body { margin: 0; height: 100%; background: #ffffff; font-family: -apple-system, sans-serif; }
+  #toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px; background: #f7f8fa; border-bottom: 1px solid #e0e3eb;
+  }
+  #toolbar h1 { color: #131722; font-size: 14px; font-weight: 600; margin: 0 16px 0 0; }
+  #status { color: #787b86; font-size: 12px; margin-left: auto; }
+
+  /* layout picker */
+  #layout-wrap { position: relative; }
+  #layout-btn {
+    display: flex; align-items: center; gap: 6px;
+    background: #ffffff; color: #5d606b; border: 1px solid #d1d4dc;
+    border-radius: 4px; padding: 5px 10px; font-size: 13px; cursor: pointer;
+  }
+  #layout-btn:hover { background: #f0f3fa; color: #131722; }
+  #layout-btn svg { display: block; }
+  #layout-menu {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0;
+    background: #ffffff; border: 1px solid #d1d4dc; border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08); padding: 6px; z-index: 20;
+    grid-template-columns: repeat(3, 1fr); gap: 4px;
+  }
+  #layout-menu.open { display: grid; }
+  .layout-opt {
+    display: flex; align-items: center; justify-content: center;
+    padding: 8px; border-radius: 4px; cursor: pointer; border: 1px solid transparent;
+  }
+  .layout-opt:hover { background: #f0f3fa; }
+  .layout-opt.active { background: #e8f0fe; border-color: #2962ff; }
+
+  /* settings picker */
+  #settings-wrap { position: relative; }
+  #settings-btn {
+    display: flex; align-items: center; justify-content: center;
+    background: #ffffff; color: #5d606b; border: 1px solid #d1d4dc;
+    border-radius: 4px; padding: 5px 8px; cursor: pointer;
+  }
+  #settings-btn:hover { background: #f0f3fa; color: #131722; }
+  #settings-panel {
+    display: none; position: absolute; top: calc(100% + 4px); left: 0; width: 220px;
+    background: #ffffff; border: 1px solid #d1d4dc; border-radius: 6px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08); padding: 12px; z-index: 20;
+    font-size: 12px; color: #131722;
+  }
+  #settings-panel.open { display: block; }
+  .setting-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  .setting-row:last-child { margin-bottom: 0; }
+  .setting-row label { color: #5d606b; }
+  .setting-row input[type="color"] { width: 32px; height: 22px; border: 1px solid #d1d4dc; border-radius: 3px; padding: 0; cursor: pointer; }
+  .setting-row input[type="number"] { width: 48px; border: 1px solid #d1d4dc; border-radius: 3px; padding: 3px 5px; font-size: 12px; }
+
+  /* chart grid */
+  #grid { position: absolute; top: 45px; left: 0; right: 0; bottom: 0; display: grid; gap: 1px; background: #e0e3eb; }
+  .cell { position: relative; background: #ffffff; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .cell-toolbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: #ffffff; border-bottom: 1px solid #f0f3fa; }
+  .cell-tf {
+    font-size: 12px; color: #5d606b; background: #f7f8fa; border: 1px solid #d1d4dc;
+    border-radius: 3px; padding: 2px 6px; cursor: pointer;
+  }
+  .cell-status { font-size: 11px; color: #787b86; margin-left: auto; }
+  .cell-chart { flex: 1; min-height: 0; }
+</style>
+</head>
+<body>
+  <div id="toolbar">
+    <h1 id="title">trading-bot</h1>
+
+    <div id="layout-wrap">
+      <button id="layout-btn" title="Chart layout">
+        <span id="layout-icon"></span>
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 3.5L5 6.5L8 3.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div id="layout-menu"></div>
+    </div>
+
+    <div id="settings-wrap">
+      <button id="settings-btn" title="Chart settings">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="2.2" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M8 1.5v1.6M8 12.9v1.6M14.5 8h-1.6M3.1 8H1.5M12.6 3.4l-1.1 1.1M4.5 11.5l-1.1 1.1M12.6 12.6l-1.1-1.1M4.5 4.5L3.4 3.4"
+            stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div id="settings-panel">
+        <div class="setting-row">
+          <label>Bull color</label>
+          <input type="color" id="set-up-color" />
+        </div>
+        <div class="setting-row">
+          <label>Bear color</label>
+          <input type="color" id="set-down-color" />
+        </div>
+        <div class="setting-row">
+          <label>Grid lines</label>
+          <input type="checkbox" id="set-grid-lines" />
+        </div>
+        <div class="setting-row">
+          <label>Price precision</label>
+          <input type="number" id="set-precision" min="0" max="8" step="1" />
+        </div>
+      </div>
+    </div>
+
+    <div id="status"></div>
+  </div>
+
+  <div id="grid"></div>
+
+  <script>
+    const TIMEFRAMES = ["M15", "H1", "H4", "D1"];
+    const statusEl = document.getElementById("status");
+    const titleEl = document.getElementById("title");
+    const gridEl = document.getElementById("grid");
+
+    // layout definitions: id -> { cols, rows, icon rects (x,y,w,h in 0..14 units), defaultTfs }
+    const LAYOUTS = {
+      "1x1": { cols: 1, rows: 1, rects: [[1,1,14,14]], tfs: ["M15"] },
+      "2x1":  { cols: 2, rows: 1, rects: [[1,1,6,14],[8,1,6,14]], tfs: ["M15","H1"] },
+      "1x2":  { cols: 1, rows: 2, rects: [[1,1,14,6],[1,8,14,6]], tfs: ["M15","H1"] },
+      "2x2":  { cols: 2, rows: 2, rects: [[1,1,6,6],[8,1,6,6],[1,8,6,6],[8,8,6,6]], tfs: ["M15","H1","H4","D1"] },
+      "4x1":  { cols: 4, rows: 1, rects: [[1,1,2.5,14],[4,1,2.5,14],[7,1,2.5,14],[10,1,2.5,14]], tfs: ["M15","H1","H4","D1"] },
+      "1x4":  { cols: 1, rows: 4, rects: [[1,1,14,2.5],[1,4,14,2.5],[1,7,14,2.5],[1,10,14,2.5]], tfs: ["M15","H1","H4","D1"] },
+    };
+
+    let availableTfs = TIMEFRAMES;
+    let currentLayout = "1x1";
+    let cells = []; // { chart, series, tfSelect, statusEl, ro }
+
+    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5 };
+    let chartSettings = loadSettings();
+
+    function loadSettings() {
+      try {
+        const saved = JSON.parse(localStorage.getItem("chartSettings"));
+        return { ...DEFAULT_SETTINGS, ...saved };
+      } catch (e) {
+        return { ...DEFAULT_SETTINGS };
+      }
+    }
+
+    function saveSettings() {
+      localStorage.setItem("chartSettings", JSON.stringify(chartSettings));
+    }
+
+    function applySettingsToCell(cell) {
+      cell.series.applyOptions({
+        upColor: chartSettings.upColor, downColor: chartSettings.downColor,
+        borderUpColor: chartSettings.upColor, borderDownColor: chartSettings.downColor,
+        wickUpColor: chartSettings.upColor, wickDownColor: chartSettings.downColor,
+        priceFormat: { type: "price", precision: chartSettings.precision, minMove: 1 / Math.pow(10, chartSettings.precision) },
+      });
+      cell.chart.applyOptions({
+        grid: {
+          vertLines: { visible: chartSettings.gridLines, color: "#f0f3fa" },
+          horzLines: { visible: false },
+        },
+      });
+    }
+
+    function applySettingsToAllCells() {
+      cells.forEach(applySettingsToCell);
+    }
+
+    function initSettingsPanel() {
+      const upInput = document.getElementById("set-up-color");
+      const downInput = document.getElementById("set-down-color");
+      const gridInput = document.getElementById("set-grid-lines");
+      const precisionInput = document.getElementById("set-precision");
+
+      upInput.value = chartSettings.upColor;
+      downInput.value = chartSettings.downColor;
+      gridInput.checked = chartSettings.gridLines;
+      precisionInput.value = chartSettings.precision;
+
+      upInput.oninput = () => { chartSettings.upColor = upInput.value; saveSettings(); applySettingsToAllCells(); };
+      downInput.oninput = () => { chartSettings.downColor = downInput.value; saveSettings(); applySettingsToAllCells(); };
+      gridInput.onchange = () => { chartSettings.gridLines = gridInput.checked; saveSettings(); applySettingsToAllCells(); };
+      precisionInput.onchange = () => {
+        const v = Math.max(0, Math.min(8, parseInt(precisionInput.value, 10) || 0));
+        precisionInput.value = v;
+        chartSettings.precision = v;
+        saveSettings();
+        applySettingsToAllCells();
+      };
+
+      document.getElementById("settings-btn").onclick = (e) => {
+        e.stopPropagation();
+        document.getElementById("settings-panel").classList.toggle("open");
+      };
+      document.addEventListener("click", (e) => {
+        if (!document.getElementById("settings-wrap").contains(e.target)) {
+          document.getElementById("settings-panel").classList.remove("open");
+        }
+      });
+    }
+
+    function layoutIconSvg(def, size = 20) {
+      const rectsHtml = def.rects.map(([x,y,w,h]) =>
+        `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="0.6" fill="currentColor" opacity="0.75"/>`
+      ).join("");
+      return `<svg width="${size}" height="${size}" viewBox="0 0 16 16">${rectsHtml}</svg>`;
+    }
+
+    function updateLayoutButtonIcon() {
+      document.getElementById("layout-icon").innerHTML = layoutIconSvg(LAYOUTS[currentLayout], 16);
+    }
+
+    function buildLayoutMenu() {
+      const menu = document.getElementById("layout-menu");
+      menu.innerHTML = "";
+      Object.entries(LAYOUTS).forEach(([id, def]) => {
+        const opt = document.createElement("div");
+        opt.className = "layout-opt" + (id === currentLayout ? " active" : "");
+        opt.title = id;
+        opt.innerHTML = layoutIconSvg(def);
+        opt.onclick = () => {
+          currentLayout = id;
+          document.querySelectorAll(".layout-opt").forEach(o => o.classList.remove("active"));
+          opt.classList.add("active");
+          updateLayoutButtonIcon();
+          buildGrid();
+          closeMenu();
+        };
+        menu.appendChild(opt);
+      });
+    }
+
+    function openMenu() { document.getElementById("layout-menu").classList.add("open"); }
+    function closeMenu() { document.getElementById("layout-menu").classList.remove("open"); }
+
+    document.getElementById("layout-btn").onclick = (e) => {
+      e.stopPropagation();
+      document.getElementById("layout-menu").classList.toggle("open");
+    };
+    document.addEventListener("click", (e) => {
+      if (!document.getElementById("layout-wrap").contains(e.target)) closeMenu();
+    });
+
+    function destroyCells() {
+      cells.forEach(c => { c.ro.disconnect(); c.chart.remove(); });
+      cells = [];
+      gridEl.innerHTML = "";
+    }
+
+    function buildGrid() {
+      destroyCells();
+      const def = LAYOUTS[currentLayout];
+      gridEl.style.gridTemplateColumns = `repeat(${def.cols}, 1fr)`;
+      gridEl.style.gridTemplateRows = `repeat(${def.rows}, 1fr)`;
+
+      const n = def.cols * def.rows;
+      for (let i = 0; i < n; i++) {
+        const defaultTf = def.tfs[i] && availableTfs.includes(def.tfs[i]) ? def.tfs[i] : availableTfs[0];
+        cells.push(createCell(defaultTf));
+      }
+    }
+
+    function createCell(defaultTf) {
+      const cellEl = document.createElement("div");
+      cellEl.className = "cell";
+
+      const tb = document.createElement("div");
+      tb.className = "cell-toolbar";
+
+      const tfSelect = document.createElement("select");
+      tfSelect.className = "cell-tf";
+      availableTfs.forEach(tf => {
+        const opt = document.createElement("option");
+        opt.value = tf;
+        opt.textContent = tf;
+        if (tf === defaultTf) opt.selected = true;
+        tfSelect.appendChild(opt);
+      });
+
+      const cellStatus = document.createElement("span");
+      cellStatus.className = "cell-status";
+
+      tb.appendChild(tfSelect);
+      tb.appendChild(cellStatus);
+
+      const chartHost = document.createElement("div");
+      chartHost.className = "cell-chart";
+
+      cellEl.appendChild(tb);
+      cellEl.appendChild(chartHost);
+      gridEl.appendChild(cellEl);
+
+      const chart = LightweightCharts.createChart(chartHost, {
+        layout: { background: { color: "#ffffff" }, textColor: "#131722" },
+        grid: {
+          vertLines: { visible: chartSettings.gridLines, color: "#f0f3fa" },
+          horzLines: { visible: false },
+        },
+        timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#d1d4dc" },
+        rightPriceScale: { borderColor: "#d1d4dc" },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+      });
+
+      const series = chart.addCandlestickSeries({
+        upColor: chartSettings.upColor, downColor: chartSettings.downColor,
+        borderUpColor: chartSettings.upColor, borderDownColor: chartSettings.downColor,
+        wickUpColor: chartSettings.upColor, wickDownColor: chartSettings.downColor,
+        priceFormat: { type: "price", precision: chartSettings.precision, minMove: 1 / Math.pow(10, chartSettings.precision) },
+      });
+
+      const ro = new ResizeObserver(entries => {
+        const { width, height } = entries[0].contentRect;
+        chart.resize(width, height);
+      });
+      ro.observe(chartHost);
+
+      const cell = { chart, series, tfSelect, cellStatus, ro };
+      tfSelect.onchange = () => loadCell(cell);
+      loadCell(cell);
+      return cell;
+    }
+
+    async function loadCell(cell) {
+      const tf = cell.tfSelect.value;
+      cell.cellStatus.textContent = "loading…";
+      try {
+        const res = await fetch(`/api/bars?tf=${tf}`);
+        if (!res.ok) {
+          const err = await res.json();
+          cell.series.setData([]);
+          cell.cellStatus.textContent = err.detail || "error";
+          return;
+        }
+        const data = await res.json();
+        cell.series.setData(data.bars);
+        cell.chart.timeScale().fitContent();
+        cell.cellStatus.textContent = `${tf} · ${data.bars.length} bars`;
+      } catch (e) {
+        cell.cellStatus.textContent = "failed to load";
+      }
+    }
+
+    async function init() {
+      const res = await fetch("/api/timeframes");
+      const info = await res.json();
+      titleEl.textContent = info.symbol;
+      availableTfs = info.timeframes.length > 0 ? info.timeframes : TIMEFRAMES;
+
+      buildLayoutMenu();
+      updateLayoutButtonIcon();
+      initSettingsPanel();
+
+      if (info.timeframes.length > 0) {
+        statusEl.textContent = "";
+        buildGrid();
+      } else {
+        statusEl.textContent = "no data yet — run data/pipeline.py";
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
