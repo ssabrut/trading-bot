@@ -73,34 +73,62 @@ def get_bars(tf: str = "M15", source: str = "raw"):
     return {"symbol": MT5_SYMBOL, "timeframe": tf, "bars": bars}
 
 
-@app.get("/api/swings")
-def get_swings(tf: str = "M15"):
+# indicator columns to expose per TF, grouped by chart placement.
+# "overlay" columns share the price scale; "oscillator" columns get their own sub-pane.
+INDICATOR_SPECS = {
+    "D1": {
+        "overlay": ["ema200", "ema50"],
+        "oscillator": ["adx"],
+    },
+    "H4": {
+        "overlay": ["ema20", "ema50"],
+        "oscillator": ["adx", "macd", "macd_signal", "macd_hist"],
+    },
+    "H1": {
+        "overlay": ["ema20", "ema50"],
+        "oscillator": ["rsi"],
+    },
+    "M15": {
+        "overlay": ["ema9", "ema20", "bb_upper", "bb_lower"],
+        "oscillator": ["rsi"],
+    },
+}
+
+
+@app.get("/api/indicators")
+def get_indicators(tf: str = "M15"):
     if tf not in TIMEFRAMES:
         raise HTTPException(
             400, f"Unknown timeframe '{tf}', expected one of {TIMEFRAMES}"
         )
 
+    spec = INDICATOR_SPECS.get(tf, {"overlay": [], "oscillator": []})
     path = DATA_FEATURES / f"{MT5_SYMBOL}_{tf}_features.parquet"
     if not path.exists():
-        return {"symbol": MT5_SYMBOL, "timeframe": tf, "highs": [], "lows": []}
+        return {"symbol": MT5_SYMBOL, "timeframe": tf, "overlay": {}, "oscillator": {}}
 
     df = pd.read_parquet(path)
-    if "swing_high" not in df.columns or "swing_low" not in df.columns:
-        return {"symbol": MT5_SYMBOL, "timeframe": tf, "highs": [], "lows": []}
+    times = (df["datetime"].astype("int64") // 1_000).tolist()
 
-    ohlc_path = DATA_PROCESSED / f"{MT5_SYMBOL}_{tf}.parquet"
-    price = pd.read_parquet(ohlc_path)[["datetime", "high", "low"]]
-    merged = df[["datetime", "swing_high", "swing_low"]].merge(price, on="datetime", how="left")
+    def series_for(cols: list[str]) -> dict:
+        result = {}
+        for col in cols:
+            if col not in df.columns:
+                continue
+            valid = df[col].notna()
+            result[col] = [
+                {"time": t, "value": v}
+                for t, v, ok in zip(times, df[col].tolist(), valid.tolist())
+                if ok
+            ]
+        return result
 
-    highs = [
-        {"time": int(row.datetime.timestamp()), "price": row.high}
-        for row in merged[merged["swing_high"] == 1].itertuples()
-    ]
-    lows = [
-        {"time": int(row.datetime.timestamp()), "price": row.low}
-        for row in merged[merged["swing_low"] == 1].itertuples()
-    ]
-    return {"symbol": MT5_SYMBOL, "timeframe": tf, "highs": highs, "lows": lows}
+    return {
+        "symbol": MT5_SYMBOL,
+        "timeframe": tf,
+        "overlay": series_for(spec["overlay"]),
+        "oscillator": series_for(spec["oscillator"]),
+    }
 
 
 @app.get("/api/labels")

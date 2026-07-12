@@ -72,7 +72,10 @@
     border-radius: 3px; padding: 2px 6px; cursor: pointer;
   }
   .cell-status { font-size: 11px; color: #787b86; margin-left: auto; }
+  .cell-panes { flex: 1; min-height: 0; display: flex; flex-direction: column; min-width: 0; }
   .cell-chart { flex: 1; min-height: 0; }
+  .cell-oscillator { flex: 0 0 0; min-height: 0; border-top: 1px solid #f0f3fa; }
+  .cell-oscillator.visible { flex-basis: 90px; }
 </style>
 </head>
 <body>
@@ -118,8 +121,8 @@
           <input type="number" id="set-precision" min="0" max="8" step="1" />
         </div>
         <div class="setting-row">
-          <label>Swing points</label>
-          <input type="checkbox" id="set-swing-points" />
+          <label>Indicators</label>
+          <input type="checkbox" id="set-indicators" />
         </div>
         <div class="setting-row">
           <label>Labels</label>
@@ -154,7 +157,14 @@
     let currentSource = localStorage.getItem("dataSource") || "raw";
     let cells = []; // { chart, series, tfSelect, statusEl, ro }
 
-    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, swingPoints: false, labels: false };
+    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, indicators: false, labels: false };
+    const OVERLAY_COLORS = {
+      ema200: "#ff9800", ema50: "#2962ff", ema20: "#ab47bc", ema9: "#26a69a",
+      bb_upper: "#787b86", bb_lower: "#787b86",
+    };
+    const OSCILLATOR_COLORS = {
+      adx: "#ff9800", rsi: "#2962ff", macd: "#2962ff", macd_signal: "#ff9800", macd_hist: "#787b86",
+    };
     let chartSettings = loadSettings();
 
     function loadSettings() {
@@ -194,14 +204,14 @@
       const downInput = document.getElementById("set-down-color");
       const gridInput = document.getElementById("set-grid-lines");
       const precisionInput = document.getElementById("set-precision");
-      const swingInput = document.getElementById("set-swing-points");
+      const indicatorsInput = document.getElementById("set-indicators");
       const labelsInput = document.getElementById("set-labels");
 
       upInput.value = chartSettings.upColor;
       downInput.value = chartSettings.downColor;
       gridInput.checked = chartSettings.gridLines;
       precisionInput.value = chartSettings.precision;
-      swingInput.checked = chartSettings.swingPoints;
+      indicatorsInput.checked = chartSettings.indicators;
       labelsInput.checked = chartSettings.labels;
 
       upInput.oninput = () => { chartSettings.upColor = upInput.value; saveSettings(); applySettingsToAllCells(); };
@@ -214,8 +224,8 @@
         saveSettings();
         applySettingsToAllCells();
       };
-      swingInput.onchange = () => {
-        chartSettings.swingPoints = swingInput.checked;
+      indicatorsInput.onchange = () => {
+        chartSettings.indicators = indicatorsInput.checked;
         saveSettings();
         cells.forEach(loadCellMarkers);
       };
@@ -279,7 +289,7 @@
     });
 
     function destroyCells() {
-      cells.forEach(c => { c.ro.disconnect(); c.chart.remove(); });
+      cells.forEach(c => { c.ro.disconnect(); c.oscRo.disconnect(); c.chart.remove(); c.oscChart.remove(); });
       cells = [];
       gridEl.innerHTML = "";
     }
@@ -320,11 +330,20 @@
       tb.appendChild(tfSelect);
       tb.appendChild(cellStatus);
 
+      const panesEl = document.createElement("div");
+      panesEl.className = "cell-panes";
+
       const chartHost = document.createElement("div");
       chartHost.className = "cell-chart";
 
+      const oscHost = document.createElement("div");
+      oscHost.className = "cell-oscillator";
+
+      panesEl.appendChild(chartHost);
+      panesEl.appendChild(oscHost);
+
       cellEl.appendChild(tb);
-      cellEl.appendChild(chartHost);
+      cellEl.appendChild(panesEl);
       gridEl.appendChild(cellEl);
 
       const chart = LightweightCharts.createChart(chartHost, {
@@ -345,13 +364,49 @@
         priceFormat: { type: "price", precision: chartSettings.precision, minMove: 1 / Math.pow(10, chartSettings.precision) },
       });
 
+      const oscChart = LightweightCharts.createChart(oscHost, {
+        layout: { background: { color: "#ffffff" }, textColor: "#131722" },
+        grid: {
+          vertLines: { visible: chartSettings.gridLines, color: "#f0f3fa" },
+          horzLines: { visible: false },
+        },
+        timeScale: { timeVisible: true, secondsVisible: false, borderColor: "#d1d4dc", visible: false },
+        rightPriceScale: { borderColor: "#d1d4dc" },
+        crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+        handleScroll: false, handleScale: false,
+      });
+
+      // sync time scales between price chart and oscillator pane
+      let syncing = false;
+      chart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+        if (syncing || !range) return;
+        syncing = true;
+        oscChart.timeScale().setVisibleLogicalRange(range);
+        syncing = false;
+      });
+      oscChart.timeScale().subscribeVisibleLogicalRangeChange((range) => {
+        if (syncing || !range) return;
+        syncing = true;
+        chart.timeScale().setVisibleLogicalRange(range);
+        syncing = false;
+      });
+
       const ro = new ResizeObserver(entries => {
         const { width, height } = entries[0].contentRect;
         chart.resize(width, height);
       });
       ro.observe(chartHost);
 
-      const cell = { chart, series, tfSelect, cellStatus, ro, barrierPrimitive: null };
+      const oscRo = new ResizeObserver(entries => {
+        const { width, height } = entries[0].contentRect;
+        if (height > 0) oscChart.resize(width, height);
+      });
+      oscRo.observe(oscHost);
+
+      const cell = {
+        chart, series, oscChart, oscHost, tfSelect, cellStatus, ro, oscRo,
+        barrierPrimitive: null, overlaySeries: [], oscSeries: [],
+      };
       tfSelect.onchange = () => loadCell(cell);
       loadCell(cell);
       return cell;
@@ -378,25 +433,59 @@
       }
     }
 
-    async function fetchSwingMarkers(tf) {
-      if (!chartSettings.swingPoints) return [];
+    async function fetchIndicators(tf) {
+      if (!chartSettings.indicators) return { overlay: {}, oscillator: {} };
       try {
-        const res = await fetch(`/api/swings?tf=${tf}`);
-        if (!res.ok) return [];
-        const data = await res.json();
-        return [
-          ...data.highs.map(p => ({
-            time: p.time, position: "aboveBar", color: "#ef5350",
-            shape: "arrowDown", text: "H",
-          })),
-          ...data.lows.map(p => ({
-            time: p.time, position: "belowBar", color: "#26a69a",
-            shape: "arrowUp", text: "L",
-          })),
-        ];
+        const res = await fetch(`/api/indicators?tf=${tf}`);
+        if (!res.ok) return { overlay: {}, oscillator: {} };
+        return await res.json();
       } catch (e) {
-        return [];
+        return { overlay: {}, oscillator: {} };
       }
+    }
+
+    function clearIndicators(cell) {
+      cell.overlaySeries.forEach(s => cell.chart.removeSeries(s));
+      cell.overlaySeries = [];
+      cell.oscSeries.forEach(s => cell.oscChart.removeSeries(s));
+      cell.oscSeries = [];
+    }
+
+    function applyIndicators(cell, data) {
+      clearIndicators(cell);
+
+      const overlayCols = Object.keys(data.overlay || {});
+      overlayCols.forEach(col => {
+        const points = data.overlay[col];
+        if (!points || points.length === 0) return;
+        const line = cell.chart.addLineSeries({
+          color: OVERLAY_COLORS[col] || "#787b86",
+          lineWidth: 1,
+          title: col,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        line.setData(points);
+        cell.overlaySeries.push(line);
+      });
+
+      const oscCols = Object.keys(data.oscillator || {});
+      const hasOsc = oscCols.some(col => (data.oscillator[col] || []).length > 0);
+      cell.oscHost.classList.toggle("visible", hasOsc);
+      requestAnimationFrame(() => cell.oscChart.resize(cell.oscHost.clientWidth, cell.oscHost.clientHeight));
+
+      oscCols.forEach(col => {
+        const points = data.oscillator[col];
+        if (!points || points.length === 0) return;
+        const isHist = col === "macd_hist";
+        const line = isHist
+          ? cell.oscChart.addHistogramSeries({ color: OSCILLATOR_COLORS[col] || "#787b86", title: col, priceLineVisible: false, lastValueVisible: false })
+          : cell.oscChart.addLineSeries({ color: OSCILLATOR_COLORS[col] || "#787b86", lineWidth: 1, title: col, priceLineVisible: false, lastValueVisible: false });
+        line.setData(points);
+        cell.oscSeries.push(line);
+      });
+
+      if (hasOsc) cell.oscChart.timeScale().setVisibleLogicalRange(cell.chart.timeScale().getVisibleLogicalRange());
     }
 
     async function fetchLabelEvents(tf) {
@@ -413,10 +502,10 @@
 
     async function loadCellMarkers(cell) {
       const tf = cell.tfSelect.value;
-      const [swingMarkers, labelEvents] = await Promise.all([
-        fetchSwingMarkers(tf), fetchLabelEvents(tf),
+      const [indicatorData, labelEvents] = await Promise.all([
+        fetchIndicators(tf), fetchLabelEvents(tf),
       ]);
-      cell.series.setMarkers(swingMarkers.sort((a, b) => a.time - b.time));
+      applyIndicators(cell, indicatorData);
 
       if (cell.barrierPrimitive) {
         cell.series.detachPrimitive(cell.barrierPrimitive);
