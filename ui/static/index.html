@@ -121,6 +121,10 @@
           <label>Swing points</label>
           <input type="checkbox" id="set-swing-points" />
         </div>
+        <div class="setting-row">
+          <label>Labels</label>
+          <input type="checkbox" id="set-labels" />
+        </div>
       </div>
     </div>
 
@@ -150,7 +154,7 @@
     let currentSource = localStorage.getItem("dataSource") || "raw";
     let cells = []; // { chart, series, tfSelect, statusEl, ro }
 
-    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, swingPoints: false };
+    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, swingPoints: false, labels: false };
     let chartSettings = loadSettings();
 
     function loadSettings() {
@@ -191,12 +195,14 @@
       const gridInput = document.getElementById("set-grid-lines");
       const precisionInput = document.getElementById("set-precision");
       const swingInput = document.getElementById("set-swing-points");
+      const labelsInput = document.getElementById("set-labels");
 
       upInput.value = chartSettings.upColor;
       downInput.value = chartSettings.downColor;
       gridInput.checked = chartSettings.gridLines;
       precisionInput.value = chartSettings.precision;
       swingInput.checked = chartSettings.swingPoints;
+      labelsInput.checked = chartSettings.labels;
 
       upInput.oninput = () => { chartSettings.upColor = upInput.value; saveSettings(); applySettingsToAllCells(); };
       downInput.oninput = () => { chartSettings.downColor = downInput.value; saveSettings(); applySettingsToAllCells(); };
@@ -211,7 +217,12 @@
       swingInput.onchange = () => {
         chartSettings.swingPoints = swingInput.checked;
         saveSettings();
-        cells.forEach(loadSwingMarkers);
+        cells.forEach(loadCellMarkers);
+      };
+      labelsInput.onchange = () => {
+        chartSettings.labels = labelsInput.checked;
+        saveSettings();
+        cells.forEach(loadCellMarkers);
       };
 
       document.getElementById("settings-btn").onclick = (e) => {
@@ -340,7 +351,7 @@
       });
       ro.observe(chartHost);
 
-      const cell = { chart, series, tfSelect, cellStatus, ro };
+      const cell = { chart, series, tfSelect, cellStatus, ro, barrierPrimitive: null };
       tfSelect.onchange = () => loadCell(cell);
       loadCell(cell);
       return cell;
@@ -361,23 +372,19 @@
         cell.series.setData(data.bars);
         cell.chart.timeScale().fitContent();
         cell.cellStatus.textContent = `${tf} · ${data.bars.length} bars`;
-        await loadSwingMarkers(cell);
+        await loadCellMarkers(cell);
       } catch (e) {
         cell.cellStatus.textContent = "failed to load";
       }
     }
 
-    async function loadSwingMarkers(cell) {
-      if (!chartSettings.swingPoints) {
-        cell.series.setMarkers([]);
-        return;
-      }
-      const tf = cell.tfSelect.value;
+    async function fetchSwingMarkers(tf) {
+      if (!chartSettings.swingPoints) return [];
       try {
         const res = await fetch(`/api/swings?tf=${tf}`);
-        if (!res.ok) { cell.series.setMarkers([]); return; }
+        if (!res.ok) return [];
         const data = await res.json();
-        const markers = [
+        return [
           ...data.highs.map(p => ({
             time: p.time, position: "aboveBar", color: "#ef5350",
             shape: "arrowDown", text: "H",
@@ -386,11 +393,101 @@
             time: p.time, position: "belowBar", color: "#26a69a",
             shape: "arrowUp", text: "L",
           })),
-        ].sort((a, b) => a.time - b.time);
-        cell.series.setMarkers(markers);
+        ];
       } catch (e) {
-        cell.series.setMarkers([]);
+        return [];
       }
+    }
+
+    async function fetchLabelEvents(tf) {
+      if (!chartSettings.labels) return [];
+      try {
+        const res = await fetch(`/api/labels?tf=${tf}`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.events;
+      } catch (e) {
+        return [];
+      }
+    }
+
+    async function loadCellMarkers(cell) {
+      const tf = cell.tfSelect.value;
+      const [swingMarkers, labelEvents] = await Promise.all([
+        fetchSwingMarkers(tf), fetchLabelEvents(tf),
+      ]);
+      cell.series.setMarkers(swingMarkers.sort((a, b) => a.time - b.time));
+
+      if (cell.barrierPrimitive) {
+        cell.series.detachPrimitive(cell.barrierPrimitive);
+        cell.barrierPrimitive = null;
+      }
+      if (labelEvents.length > 0) {
+        cell.barrierPrimitive = new BarrierBoxesPrimitive(labelEvents);
+        cell.series.attachPrimitive(cell.barrierPrimitive);
+      }
+    }
+
+    // ── Barrier box primitive: outline rectangle per event, entry->exit time, lower->upper barrier price
+    const BARRIER_COLOR = { 1: "#26a69a", "-1": "#ef5350", 0: "#787b86" };
+
+    class BarrierBoxesPaneView {
+      constructor(source) { this._source = source; }
+      update() {}
+      renderer() {
+        const events = this._source._events;
+        const chart = this._source._chart;
+        const series = this._source._series;
+        const timeScale = chart.timeScale();
+        const boxes = events.map(ev => {
+          const x1 = timeScale.timeToCoordinate(ev.entry_time);
+          const x2 = timeScale.timeToCoordinate(ev.exit_time);
+          const yTop = series.priceToCoordinate(ev.upper_barrier);
+          const yBottom = series.priceToCoordinate(ev.lower_barrier);
+          if (x1 === null || x2 === null || yTop === null || yBottom === null) return null;
+          return { x1, x2, yTop, yBottom, color: BARRIER_COLOR[ev.label] };
+        }).filter(b => b !== null);
+
+        return {
+          draw: (target) => {
+            target.useBitmapCoordinateSpace((scope) => {
+              const ctx = scope.context;
+              ctx.save();
+              ctx.scale(scope.horizontalPixelRatio, scope.verticalPixelRatio);
+              boxes.forEach(b => {
+                ctx.strokeStyle = b.color;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 3]);
+                const x = Math.min(b.x1, b.x2);
+                const w = Math.abs(b.x2 - b.x1);
+                const y = Math.min(b.yTop, b.yBottom);
+                const h = Math.abs(b.yBottom - b.yTop);
+                ctx.strokeRect(x, y, w, h);
+              });
+              ctx.restore();
+            });
+          },
+        };
+      }
+    }
+
+    class BarrierBoxesPrimitive {
+      constructor(events) {
+        this._events = events;
+        this._chart = null;
+        this._series = null;
+        this._paneView = new BarrierBoxesPaneView(this);
+      }
+      attached({ chart, series }) {
+        this._chart = chart;
+        this._series = series;
+      }
+      detached() {
+        this._chart = null;
+        this._series = null;
+      }
+      updateAllViews() {}
+      paneViews() { return [this._paneView]; }
     }
 
     async function loadTimeframesAndBuildGrid() {
