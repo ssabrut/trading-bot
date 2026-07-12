@@ -108,12 +108,15 @@ class MultiTimeframeTradingEnv(gym.Env):
         self._bars_dt = self.bars["datetime"].values
 
         # indicator warmup (e.g. EMA200 on D1) leaves NaN rows at the start of each TF's
-        # feature file — episodes must not start before ALL timeframes are past warmup.
+        # feature file. Episodes must not start until every TF's full lookback WINDOW is
+        # past warmup — not just the as-of bar itself, or the window's earliest rows leak NaN.
         warmup_dt = max(
-            self.norm[tf]["datetime"].iloc[self.norm[tf][FEATURE_COLS[tf]].notna().all(axis=1).idxmax()]
+            self.norm[tf]["datetime"].iloc[
+                self.norm[tf][FEATURE_COLS[tf]].notna().all(axis=1).idxmax() + WINDOW[tf] - 1
+            ]
             for tf in TIMEFRAMES
         )
-        self._warmup_bar_idx = int(np.searchsorted(self._bars_dt, np.datetime64(warmup_dt), side="right"))
+        self._warmup_bar_idx = int(np.searchsorted(self._bars_dt, pd.Timestamp(warmup_dt).to_datetime64(), side="right"))
 
     def _asof_index(self, tf: str, t: np.datetime64) -> int:
         """Index of the latest CLOSED bar at or before time t (no lookahead)."""
