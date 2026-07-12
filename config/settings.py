@@ -5,12 +5,10 @@ ROOT = Path(__file__).parent.parent
 DATA_RAW = ROOT / "data" / "raw"
 DATA_PROCESSED = ROOT / "data" / "processed"
 DATA_FEATURES = ROOT / "data" / "features"
-DATA_LABELS = ROOT / "data" / "labels"
 
 DATA_RAW.mkdir(parents=True, exist_ok=True)
 DATA_PROCESSED.mkdir(parents=True, exist_ok=True)
 DATA_FEATURES.mkdir(parents=True, exist_ok=True)
-DATA_LABELS.mkdir(parents=True, exist_ok=True)
 
 # ── MT5 ────────────────────────────────────────────────────────────────────────
 MT5_SYMBOL = "GBPUSD"

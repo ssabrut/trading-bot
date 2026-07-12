@@ -19,7 +19,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from config.settings import DATA_FEATURES, DATA_LABELS, DATA_PROCESSED, DATA_RAW, MT5_SYMBOL
+from config.settings import DATA_FEATURES, DATA_PROCESSED, DATA_RAW, MT5_SYMBOL
 
 app = FastAPI(title="trading-bot chart viewer")
 
@@ -129,33 +129,6 @@ def get_indicators(tf: str = "M15"):
         "overlay": series_for(spec["overlay"]),
         "oscillator": series_for(spec["oscillator"]),
     }
-
-
-@app.get("/api/labels")
-def get_labels(tf: str = "M15"):
-    if tf not in TIMEFRAMES:
-        raise HTTPException(
-            400, f"Unknown timeframe '{tf}', expected one of {TIMEFRAMES}"
-        )
-
-    path = DATA_LABELS / f"{MT5_SYMBOL}_{tf}_labels.parquet"
-    if not path.exists():
-        return {"symbol": MT5_SYMBOL, "timeframe": tf, "events": []}
-
-    df = pd.read_parquet(path)
-    events = [
-        {
-            "entry_time": int(row.datetime.timestamp()),
-            "entry_price": row.entry_price,
-            "exit_time": int(row.exit_datetime.timestamp()),
-            "exit_price": row.exit_price,
-            "upper_barrier": row.upper_barrier,
-            "lower_barrier": row.lower_barrier,
-            "label": int(row.label),
-        }
-        for row in df.itertuples()
-    ]
-    return {"symbol": MT5_SYMBOL, "timeframe": tf, "events": events}
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

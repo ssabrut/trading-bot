@@ -124,10 +124,6 @@
           <label>Indicators</label>
           <input type="checkbox" id="set-indicators" />
         </div>
-        <div class="setting-row">
-          <label>Labels</label>
-          <input type="checkbox" id="set-labels" />
-        </div>
       </div>
     </div>
 
@@ -157,7 +153,7 @@
     let currentSource = localStorage.getItem("dataSource") || "raw";
     let cells = []; // { chart, series, tfSelect, statusEl, ro }
 
-    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, indicators: false, labels: false };
+    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, indicators: false };
     const OVERLAY_COLORS = {
       ema200: "#ff9800", ema50: "#2962ff", ema20: "#ab47bc", ema9: "#26a69a",
       bb_upper: "#787b86", bb_lower: "#787b86",
@@ -205,14 +201,12 @@
       const gridInput = document.getElementById("set-grid-lines");
       const precisionInput = document.getElementById("set-precision");
       const indicatorsInput = document.getElementById("set-indicators");
-      const labelsInput = document.getElementById("set-labels");
 
       upInput.value = chartSettings.upColor;
       downInput.value = chartSettings.downColor;
       gridInput.checked = chartSettings.gridLines;
       precisionInput.value = chartSettings.precision;
       indicatorsInput.checked = chartSettings.indicators;
-      labelsInput.checked = chartSettings.labels;
 
       upInput.oninput = () => { chartSettings.upColor = upInput.value; saveSettings(); applySettingsToAllCells(); };
       downInput.oninput = () => { chartSettings.downColor = downInput.value; saveSettings(); applySettingsToAllCells(); };
@@ -226,11 +220,6 @@
       };
       indicatorsInput.onchange = () => {
         chartSettings.indicators = indicatorsInput.checked;
-        saveSettings();
-        cells.forEach(loadCellMarkers);
-      };
-      labelsInput.onchange = () => {
-        chartSettings.labels = labelsInput.checked;
         saveSettings();
         cells.forEach(loadCellMarkers);
       };
@@ -405,7 +394,7 @@
 
       const cell = {
         chart, series, oscChart, oscHost, tfSelect, cellStatus, ro, oscRo,
-        barrierPrimitive: null, overlaySeries: [], oscSeries: [],
+        overlaySeries: [], oscSeries: [],
       };
       tfSelect.onchange = () => loadCell(cell);
       loadCell(cell);
@@ -488,95 +477,10 @@
       if (hasOsc) cell.oscChart.timeScale().setVisibleLogicalRange(cell.chart.timeScale().getVisibleLogicalRange());
     }
 
-    async function fetchLabelEvents(tf) {
-      if (!chartSettings.labels) return [];
-      try {
-        const res = await fetch(`/api/labels?tf=${tf}`);
-        if (!res.ok) return [];
-        const data = await res.json();
-        return data.events;
-      } catch (e) {
-        return [];
-      }
-    }
-
     async function loadCellMarkers(cell) {
       const tf = cell.tfSelect.value;
-      const [indicatorData, labelEvents] = await Promise.all([
-        fetchIndicators(tf), fetchLabelEvents(tf),
-      ]);
+      const indicatorData = await fetchIndicators(tf);
       applyIndicators(cell, indicatorData);
-
-      if (cell.barrierPrimitive) {
-        cell.series.detachPrimitive(cell.barrierPrimitive);
-        cell.barrierPrimitive = null;
-      }
-      if (labelEvents.length > 0) {
-        cell.barrierPrimitive = new BarrierBoxesPrimitive(labelEvents);
-        cell.series.attachPrimitive(cell.barrierPrimitive);
-      }
-    }
-
-    // ── Barrier box primitive: outline rectangle per event, entry->exit time, lower->upper barrier price
-    const BARRIER_COLOR = { 1: "#26a69a", "-1": "#ef5350", 0: "#787b86" };
-
-    class BarrierBoxesPaneView {
-      constructor(source) { this._source = source; }
-      update() {}
-      renderer() {
-        const events = this._source._events;
-        const chart = this._source._chart;
-        const series = this._source._series;
-        const timeScale = chart.timeScale();
-        const boxes = events.map(ev => {
-          const x1 = timeScale.timeToCoordinate(ev.entry_time);
-          const x2 = timeScale.timeToCoordinate(ev.exit_time);
-          const yTop = series.priceToCoordinate(ev.upper_barrier);
-          const yBottom = series.priceToCoordinate(ev.lower_barrier);
-          if (x1 === null || x2 === null || yTop === null || yBottom === null) return null;
-          return { x1, x2, yTop, yBottom, color: BARRIER_COLOR[ev.label] };
-        }).filter(b => b !== null);
-
-        return {
-          draw: (target) => {
-            target.useBitmapCoordinateSpace((scope) => {
-              const ctx = scope.context;
-              ctx.save();
-              ctx.scale(scope.horizontalPixelRatio, scope.verticalPixelRatio);
-              boxes.forEach(b => {
-                ctx.strokeStyle = b.color;
-                ctx.lineWidth = 1;
-                ctx.setLineDash([4, 3]);
-                const x = Math.min(b.x1, b.x2);
-                const w = Math.abs(b.x2 - b.x1);
-                const y = Math.min(b.yTop, b.yBottom);
-                const h = Math.abs(b.yBottom - b.yTop);
-                ctx.strokeRect(x, y, w, h);
-              });
-              ctx.restore();
-            });
-          },
-        };
-      }
-    }
-
-    class BarrierBoxesPrimitive {
-      constructor(events) {
-        this._events = events;
-        this._chart = null;
-        this._series = null;
-        this._paneView = new BarrierBoxesPaneView(this);
-      }
-      attached({ chart, series }) {
-        this._chart = chart;
-        this._series = series;
-      }
-      detached() {
-        this._chart = null;
-        this._series = null;
-      }
-      updateAllViews() {}
-      paneViews() { return [this._paneView]; }
     }
 
     async function loadTimeframesAndBuildGrid() {
