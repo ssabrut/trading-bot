@@ -7,10 +7,10 @@ pipeline:
 	poetry run python data/pipeline.py --start $(START) --end $(END) $(if $(SYMBOL),--symbol $(SYMBOL),)
 
 train:
-	poetry run python env/train.py --timesteps $(if $(TIMESTEPS),$(TIMESTEPS),50000) $(if $(N_ENVS),--n-envs $(N_ENVS),) $(if $(SEED),--seed $(SEED),)
+	set -a && . .env && set +a && poetry run python env/train.py --timesteps $(if $(TIMESTEPS),$(TIMESTEPS),50000) $(if $(N_ENVS),--n-envs $(N_ENVS),) $(if $(SEED),--seed $(SEED),) $(if $(ENT_COEF),--ent-coef $(ENT_COEF),)
 
 evaluate:
-	poetry run python env/evaluate.py --run-id $(RUN_ID) $(if $(MODEL),--model $(MODEL),--random) $(if $(SPLIT),--split $(SPLIT),)
+	set -a && . .env && set +a && poetry run python env/evaluate.py --run-id $(RUN_ID) $(if $(MLFLOW_RUN_ID),--mlflow-run-id $(MLFLOW_RUN_ID),$(if $(MODEL),--model $(MODEL),--random)) $(if $(SPLIT),--split $(SPLIT),)
 
 tensorboard:
 	poetry run tensorboard --logdir logs/ppo_tensorboard

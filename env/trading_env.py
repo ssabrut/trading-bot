@@ -35,6 +35,7 @@ SL_ATR_MULT = 1.5
 TP_ATR_MULT = 3.0
 RISK_PER_TRADE = 0.01  # fraction of equity risked per trade
 SPREAD_DEFAULT = 0.00015  # fallback spread (price units) if raw spread col is 0/missing
+EPISODE_DAYS_DEFAULT = 90
 
 
 @dataclass
@@ -54,7 +55,7 @@ class MultiTimeframeTradingEnv(gym.Env):
         self,
         split: str = "train",
         symbol: str = "GBPUSD",
-        episode_days: int = 90,
+        episode_days: int = EPISODE_DAYS_DEFAULT,
         initial_balance: float = 10_000.0,
         seed: int | None = None,
     ):
@@ -105,6 +106,14 @@ class MultiTimeframeTradingEnv(gym.Env):
         self._dt = {tf: self.norm[tf]["datetime"].values for tf in TIMEFRAMES}
         self._feat_arr = {tf: self.norm[tf][FEATURE_COLS[tf]].values.astype(np.float32) for tf in TIMEFRAMES}
         self._bars_dt = self.bars["datetime"].values
+
+        # indicator warmup (e.g. EMA200 on D1) leaves NaN rows at the start of each TF's
+        # feature file — episodes must not start before ALL timeframes are past warmup.
+        warmup_dt = max(
+            self.norm[tf]["datetime"].iloc[self.norm[tf][FEATURE_COLS[tf]].notna().all(axis=1).idxmax()]
+            for tf in TIMEFRAMES
+        )
+        self._warmup_bar_idx = int(np.searchsorted(self._bars_dt, np.datetime64(warmup_dt), side="right"))
 
     def _asof_index(self, tf: str, t: np.datetime64) -> int:
         """Index of the latest CLOSED bar at or before time t (no lookahead)."""
@@ -162,7 +171,7 @@ class MultiTimeframeTradingEnv(gym.Env):
         super().reset(seed=seed)
 
         max_start = len(self.bars) - self.episode_bars - 1
-        min_start = max(WINDOW["D1"] * 4, 0)  # skip warmup so D1/H4 windows aren't padded-only
+        min_start = self._warmup_bar_idx  # skip until all TFs' indicators are past warmup (no NaNs)
         if max_start <= min_start:
             self.start_idx = 0
             self.episode_bars = len(self.bars) - 1

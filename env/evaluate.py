@@ -5,8 +5,13 @@ Runs one episode with a trained policy (or random, for smoke-testing),
 dumps equity curve + trade log to data/runs/<run_id>/ for the chart UI
 to render as a trade-replay overlay.
 
+If --mlflow-run-id is given, the model artifact is pulled from that MLflow
+run (logged by train.py) instead of a local path, and the equity/trade JSON
+is logged back onto the same run as eval artifacts.
+
 Usage:
-    poetry run python env/evaluate.py --model models/ppo_trading_v1.zip --run-id ppo_v1
+    poetry run python env/evaluate.py --model models/ppo_<run_id>.zip --run-id ppo_v1
+    poetry run python env/evaluate.py --mlflow-run-id <run_id> --run-id ppo_v1
     poetry run python env/evaluate.py --random --run-id random_smoke   # no model needed
 """
 
@@ -17,7 +22,7 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
 
-import numpy as np
+import mlflow
 import pandas as pd
 
 from config.settings import ROOT
@@ -70,27 +75,48 @@ def save_run(run_id: str, symbol: str, split: str, equity_curve: list[dict], tra
     (out_dir / "meta.json").write_text(json.dumps({"symbol": symbol, "split": split, "n_trades": len(trades_serializable)}))
 
     print(f"[SAVE] {out_dir}: {len(equity_curve)} equity points, {len(trades_serializable)} trades")
+    return out_dir
+
+
+def load_model_from_mlflow(mlflow_run_id: str):
+    from stable_baselines3 import PPO
+
+    local_dir = mlflow.artifacts.download_artifacts(run_id=mlflow_run_id, artifact_path="model")
+    zips = list(Path(local_dir).glob("*.zip"))
+    if not zips:
+        raise FileNotFoundError(f"No model .zip found in MLflow run {mlflow_run_id} artifact_path='model'")
+    return PPO.load(zips[0])
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default=None, help="Path to trained SB3 model .zip")
+    parser.add_argument("--mlflow-run-id", type=str, default=None, help="Pull model artifact from this MLflow run instead")
     parser.add_argument("--random", action="store_true", help="Use random policy (no model needed)")
     parser.add_argument("--split", type=str, default="val", choices=["train", "val", "test"])
     parser.add_argument("--symbol", type=str, default="GBPUSD")
-    parser.add_argument("--run-id", type=str, required=True)
+    parser.add_argument("--run-id", type=str, required=True, help="Local run-id — names the data/runs/<run-id>/ output folder")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
-    if not args.random and not args.model:
-        parser.error("pass --model <path> or --random")
+    if not args.random and not args.model and not args.mlflow_run_id:
+        parser.error("pass --model <path>, --mlflow-run-id <id>, or --random")
 
     env = MultiTimeframeTradingEnv(split=args.split, symbol=args.symbol, seed=args.seed)
 
     model = None
-    if args.model:
+    if args.mlflow_run_id:
+        model = load_model_from_mlflow(args.mlflow_run_id)
+    elif args.model:
         from stable_baselines3 import PPO
         model = PPO.load(args.model)
 
     equity_curve, trade_log = run_episode(env, model=model, seed=args.seed)
-    save_run(args.run_id, args.symbol, args.split, equity_curve, trade_log)
+    out_dir = save_run(args.run_id, args.symbol, args.split, equity_curve, trade_log)
+
+    if args.mlflow_run_id:
+        with mlflow.start_run(run_id=args.mlflow_run_id):
+            mlflow.log_artifacts(str(out_dir), artifact_path=f"eval/{args.split}")
+            mlflow.log_metric(f"eval_{args.split}_n_trades", len(trade_log))
+            mlflow.log_metric(f"eval_{args.split}_final_equity", equity_curve[-1]["equity"])
+        print(f"[MLFLOW] eval artifacts logged to run {args.mlflow_run_id} (eval/{args.split})")
