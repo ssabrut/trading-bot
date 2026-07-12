@@ -4,7 +4,8 @@ env/trading_env.py
 Multi-timeframe Gymnasium environment. Steps on M15; H1/H4/D1 observation
 windows only update when their last-closed bar changes (as-of, no lookahead).
 
-Action space: Discrete(4) — Hold / Buy / Sell / Close.
+Action space: Discrete(3) — Hold / Buy / Sell. One position at a time; once opened,
+a trade rides to SL or TP with no agent-initiated early exit.
 SL/TP are ATR-based (not agent-controlled) — v1 baseline, see notebooks/5_env.ipynb.
 """
 
@@ -29,13 +30,14 @@ FEATURE_COLS = {
     "D1": ["ema200", "ema50", "ema_regime", "adx", "atr", "atr_pct"],
 }
 
-HOLD, BUY, SELL, CLOSE = 0, 1, 2, 3
+HOLD, BUY, SELL = 0, 1, 2
 
 SL_ATR_MULT = 1.5
 TP_ATR_MULT = 3.0
 RISK_PER_TRADE = 0.01  # fraction of equity risked per trade
 SPREAD_DEFAULT = 0.00015  # fallback spread (price units) if raw spread col is 0/missing
 EPISODE_DAYS_DEFAULT = 90
+IDLE_PENALTY = 0.00002  # per-step reward while flat — removes HOLD-forever as a zero-cost local optimum
 
 
 @dataclass
@@ -68,7 +70,7 @@ class MultiTimeframeTradingEnv(gym.Env):
 
         self._load_data()
 
-        self.action_space = spaces.Discrete(4)
+        self.action_space = spaces.Discrete(3)
         self.observation_space = spaces.Dict(
             {
                 **{
@@ -267,9 +269,7 @@ class MultiTimeframeTradingEnv(gym.Env):
             self._open_position(1)
         elif action == SELL and self.position is None:
             self._open_position(-1)
-        elif action == CLOSE and self.position is not None:
-            realized += self._close_position(reason="agent")
-        # HOLD: no-op
+        # HOLD, or BUY/SELL while a position is already open: no-op
 
         self.cursor += 1
         terminated = False
@@ -283,6 +283,8 @@ class MultiTimeframeTradingEnv(gym.Env):
         self.peak_equity = max(self.peak_equity, equity_after)
 
         reward = (equity_after - equity_before) / self.initial_balance
+        if self.position is None:
+            reward -= IDLE_PENALTY
 
         obs = self._get_obs()
         info = {"balance": self.balance, "equity": equity_after, "realized_pnl": realized}

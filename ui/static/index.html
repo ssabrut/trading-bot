@@ -66,7 +66,13 @@
   .setting-row input[type="number"] { width: 48px; border: 1px solid #d1d4dc; border-radius: 3px; padding: 3px 5px; font-size: 12px; }
 
   /* chart grid */
-  #grid { position: absolute; top: 45px; left: 0; right: 0; bottom: 0; display: grid; gap: 1px; background: #e0e3eb; }
+  #chart-area { position: absolute; top: 45px; left: 0; right: 0; bottom: 0; display: flex; flex-direction: column; }
+  #grid { flex: 1; min-height: 0; display: grid; gap: 1px; background: #e0e3eb; }
+  #equity-panel { flex: 0 0 0; min-height: 0; border-top: 1px solid #e0e3eb; display: flex; flex-direction: column; overflow: hidden; }
+  #equity-panel.visible { flex-basis: 140px; }
+  #equity-toolbar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 11px; color: #5d606b; background: #f7f8fa; }
+  #equity-toolbar b { color: #131722; font-weight: 600; }
+  #equity-chart { flex: 1; min-height: 0; }
   .cell { position: relative; background: #ffffff; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
   .cell-toolbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: #ffffff; border-bottom: 1px solid #f0f3fa; }
   .cell-tf {
@@ -142,7 +148,16 @@
     <div id="status"></div>
   </div>
 
-  <div id="grid"></div>
+  <div id="chart-area">
+    <div id="grid"></div>
+    <div id="equity-panel">
+      <div id="equity-toolbar">
+        <span>Equity — <b id="equity-run-label"></b></span>
+        <span id="equity-stats" style="margin-left:auto;"></span>
+      </div>
+      <div id="equity-chart"></div>
+    </div>
+  </div>
 
   <script>
     const TIMEFRAMES = ["M15", "H1", "H4", "D1"];
@@ -206,6 +221,11 @@
 
     function applySettingsToAllCells() {
       cells.forEach(applySettingsToCell);
+      if (equityChart) {
+        equityChart.applyOptions({
+          grid: { vertLines: { visible: chartSettings.gridLines, color: "#f0f3fa" }, horzLines: { visible: false } },
+        });
+      }
     }
 
     function initSettingsPanel() {
@@ -418,6 +438,18 @@
       };
       tfSelect.onchange = () => loadCell(cell);
       loadCell(cell);
+
+      // sync equity panel's time axis to this cell if it's the primary (first) cell
+      if (cells.length === 0) {
+        let syncingEquity = false;
+        chart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+          if (syncingEquity || !range || !equityChart) return;
+          syncingEquity = true;
+          equityChart.timeScale().setVisibleRange(range);
+          syncingEquity = false;
+        });
+      }
+
       return cell;
     }
 
@@ -705,21 +737,83 @@
         currentRun = runSelect.value;
         document.getElementById("zoom-trades-btn").disabled = !currentRun;
         await Promise.all(cells.map(loadCellMarkers));
+        await loadEquityPanel();
         zoomToTrades();
       };
       document.getElementById("zoom-trades-btn").disabled = !currentRun;
       document.getElementById("zoom-trades-btn").onclick = zoomToTrades;
     }
 
+    // ── Equity curve panel ──────────────────────────────────────────────
+    let equityChart = null;
+    let equitySeries = null;
+
+    function initEquityChart() {
+      const host = document.getElementById("equity-chart");
+      equityChart = LightweightCharts.createChart(host, {
+        layout: { background: { color: "#ffffff" }, textColor: "#131722", fontSize: 11 },
+        grid: { vertLines: { visible: chartSettings.gridLines, color: "#f0f3fa" }, horzLines: { visible: false } },
+        rightPriceScale: { borderColor: "#e0e3eb" },
+        timeScale: { borderColor: "#e0e3eb" },
+      });
+      equitySeries = equityChart.addLineSeries({
+        color: "#2962ff", lineWidth: 2, priceLineVisible: false, lastValueVisible: true,
+      });
+      new ResizeObserver(entries => {
+        const { width, height } = entries[0].contentRect;
+        if (height > 0) equityChart.resize(width, height);
+      }).observe(host);
+    }
+
+    async function loadEquityPanel() {
+      const panel = document.getElementById("equity-panel");
+      const label = document.getElementById("equity-run-label");
+      const stats = document.getElementById("equity-stats");
+
+      if (!currentRun) {
+        panel.classList.remove("visible");
+        return;
+      }
+      try {
+        const res = await fetch(`/api/runs/${currentRun}/equity`);
+        if (!res.ok) { panel.classList.remove("visible"); return; }
+        const data = await res.json();
+        const points = data.points.map(p => ({ time: p.time, value: p.equity }));
+        if (points.length === 0) { panel.classList.remove("visible"); return; }
+
+        if (!equityChart) initEquityChart();
+        equitySeries.setData(points);
+        equityChart.timeScale().fitContent();
+
+        const start = points[0].value;
+        const end = points[points.length - 1].value;
+        const retPct = ((end - start) / start) * 100;
+        let peak = -Infinity, maxDd = 0;
+        points.forEach(p => {
+          peak = Math.max(peak, p.value);
+          maxDd = Math.min(maxDd, ((p.value - peak) / peak) * 100);
+        });
+
+        label.textContent = currentRun;
+        stats.textContent = `Final: $${end.toFixed(2)} · Return: ${retPct >= 0 ? "+" : ""}${retPct.toFixed(2)}% · Max DD: ${maxDd.toFixed(2)}%`;
+        panel.classList.add("visible");
+      } catch (e) {
+        panel.classList.remove("visible");
+      }
+    }
+
     function zoomToTrades() {
+      let range = null;
       cells.forEach(cell => {
         const trades = cell.trades;
         if (!trades || trades.length === 0) return;
         const from = Math.min(...trades.map(t => t.entry_time));
         const to = Math.max(...trades.map(t => t.exit_time));
         const pad = Math.round((to - from) * 0.05) || 3600;
-        cell.chart.timeScale().setVisibleRange({ from: from - pad, to: to + pad });
+        range = { from: from - pad, to: to + pad };
+        cell.chart.timeScale().setVisibleRange(range);
       });
+      if (range && equityChart) equityChart.timeScale().setVisibleRange(range);
     }
 
     async function init() {

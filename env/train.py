@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -29,6 +30,7 @@ from config.settings import ROOT
 from env.trading_env import (
     EPISODE_DAYS_DEFAULT,
     FEATURE_COLS,
+    IDLE_PENALTY,
     RISK_PER_TRADE,
     SL_ATR_MULT,
     TP_ATR_MULT,
@@ -70,6 +72,8 @@ def make_env(split: str, seed: int):
 def train(timesteps: int, n_envs: int, seed: int, ent_coef: float):
     mlflow.set_experiment(MLFLOW_EXPERIMENT)  # tracking URI picked up from MLFLOW_TRACKING_URI env var
 
+    run_tag = datetime.now().strftime("%Y%m%d_%H%M%S")  # sortable local name — MLflow's own run_id stays the uuid
+
     vec_env = make_vec_env(
         make_env("train", seed),
         n_envs=n_envs,
@@ -85,11 +89,12 @@ def train(timesteps: int, n_envs: int, seed: int, ent_coef: float):
         tensorboard_log=str(LOGS_DIR / "ppo_tensorboard"),
     )
 
-    with mlflow.start_run() as run:
+    with mlflow.start_run(run_name=run_tag) as run:
         run_id = run.info.run_id
 
         mlflow.log_params(
             {
+                "run_tag": run_tag,
                 "timesteps": timesteps,
                 "n_envs": n_envs,
                 "seed": seed,
@@ -98,6 +103,7 @@ def train(timesteps: int, n_envs: int, seed: int, ent_coef: float):
                 "sl_atr_mult": SL_ATR_MULT,
                 "tp_atr_mult": TP_ATR_MULT,
                 "risk_per_trade": RISK_PER_TRADE,
+                "idle_penalty": IDLE_PENALTY,
                 "window_m15": WINDOW["M15"],
                 "window_h1": WINDOW["H1"],
                 "window_h4": WINDOW["H4"],
@@ -111,7 +117,7 @@ def train(timesteps: int, n_envs: int, seed: int, ent_coef: float):
 
         model.learn(total_timesteps=timesteps, progress_bar=True, callback=MLflowCallback())
 
-        save_path = MODELS_DIR / f"ppo_{run_id}.zip"
+        save_path = MODELS_DIR / f"ppo_{run_tag}.zip"
         model.save(save_path)
         print(f"[SAVE] {save_path}")
 
@@ -121,7 +127,7 @@ def train(timesteps: int, n_envs: int, seed: int, ent_coef: float):
         if scaler_dir.exists():
             mlflow.log_artifacts(str(scaler_dir), artifact_path="scalers")
 
-        print(f"[MLFLOW] run_id={run_id}  experiment={MLFLOW_EXPERIMENT}")
+        print(f"[MLFLOW] run_id={run_id}  run_tag={run_tag}  experiment={MLFLOW_EXPERIMENT}")
 
     return model, run_id, save_path
 

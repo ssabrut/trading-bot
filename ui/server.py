@@ -138,11 +138,14 @@ def list_runs():
     if not RUNS_DIR.exists():
         return {"runs": []}
     runs = []
-    for run_dir in sorted(RUNS_DIR.iterdir()):
+    for run_dir in RUNS_DIR.iterdir():
         meta_path = run_dir / "meta.json"
         if meta_path.exists():
             meta = json.loads(meta_path.read_text())
-            runs.append({"run_id": run_dir.name, **meta})
+            # older runs predate created_at — fall back to folder mtime so sorting still works
+            created_at = meta.get("created_at") or pd.Timestamp(run_dir.stat().st_mtime, unit="s").isoformat()
+            runs.append({"run_id": run_dir.name, **meta, "created_at": created_at})
+    runs.sort(key=lambda r: r["created_at"], reverse=True)
     return {"runs": runs}
 
 

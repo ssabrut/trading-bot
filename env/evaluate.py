@@ -18,6 +18,7 @@ Usage:
 import argparse
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
@@ -74,7 +75,16 @@ def save_run(run_id: str, symbol: str, split: str, equity_curve: list[dict], tra
         for t in trade_log
     ]
     (out_dir / "trades.json").write_text(json.dumps(trades_serializable))
-    (out_dir / "meta.json").write_text(json.dumps({"symbol": symbol, "split": split, "n_trades": len(trades_serializable)}))
+    (out_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "symbol": symbol,
+                "split": split,
+                "n_trades": len(trades_serializable),
+                "created_at": datetime.now().isoformat(timespec="seconds"),
+            }
+        )
+    )
 
     print(f"[SAVE] {out_dir}: {len(equity_curve)} equity points, {len(trades_serializable)} trades")
     return out_dir
@@ -97,12 +107,15 @@ if __name__ == "__main__":
     parser.add_argument("--random", action="store_true", help="Use random policy (no model needed)")
     parser.add_argument("--split", type=str, default="val", choices=["train", "val", "test"])
     parser.add_argument("--symbol", type=str, default="GBPUSD")
-    parser.add_argument("--run-id", type=str, required=True, help="Local run-id — names the data/runs/<run-id>/ output folder")
+    parser.add_argument("--run-id", type=str, default=None, help="Local run-id — names the data/runs/<run-id>/ output folder (default: current timestamp)")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     if not args.random and not args.model and not args.mlflow_run_id:
         parser.error("pass --model <path>, --mlflow-run-id <id>, or --random")
+
+    if args.run_id is None:
+        args.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     env = MultiTimeframeTradingEnv(split=args.split, symbol=args.symbol, seed=args.seed)
 
