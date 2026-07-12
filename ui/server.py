@@ -9,6 +9,7 @@ Usage:
     open http://127.0.0.1:8000
 """
 
+import json
 import sys
 from pathlib import Path
 
@@ -19,13 +20,14 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from config.settings import DATA_FEATURES, DATA_PROCESSED, DATA_RAW, MT5_SYMBOL
+from config.settings import DATA_FEATURES, DATA_PROCESSED, DATA_RAW, MT5_SYMBOL, ROOT
 
 app = FastAPI(title="trading-bot chart viewer")
 
 STATIC_DIR = Path(__file__).parent / "static"
 TIMEFRAMES = ["M15", "H1", "H4", "D1"]
 SOURCES = {"raw": DATA_RAW, "processed": DATA_PROCESSED}
+RUNS_DIR = ROOT / "data" / "runs"
 
 
 @app.get("/")
@@ -129,6 +131,35 @@ def get_indicators(tf: str = "M15"):
         "overlay": series_for(spec["overlay"]),
         "oscillator": series_for(spec["oscillator"]),
     }
+
+
+@app.get("/api/runs")
+def list_runs():
+    if not RUNS_DIR.exists():
+        return {"runs": []}
+    runs = []
+    for run_dir in sorted(RUNS_DIR.iterdir()):
+        meta_path = run_dir / "meta.json"
+        if meta_path.exists():
+            meta = json.loads(meta_path.read_text())
+            runs.append({"run_id": run_dir.name, **meta})
+    return {"runs": runs}
+
+
+@app.get("/api/runs/{run_id}/equity")
+def get_run_equity(run_id: str):
+    path = RUNS_DIR / run_id / "equity.json"
+    if not path.exists():
+        raise HTTPException(404, f"No run '{run_id}'. Run env/evaluate.py first.")
+    return {"run_id": run_id, "points": json.loads(path.read_text())}
+
+
+@app.get("/api/runs/{run_id}/trades")
+def get_run_trades(run_id: str):
+    path = RUNS_DIR / run_id / "trades.json"
+    if not path.exists():
+        raise HTTPException(404, f"No run '{run_id}'. Run env/evaluate.py first.")
+    return {"run_id": run_id, "trades": json.loads(path.read_text())}
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

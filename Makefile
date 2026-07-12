@@ -1,10 +1,19 @@
-.PHONY: ui pipeline mlflow-up mlflow-down mlflow-logs feast-apply feast-ui
+.PHONY: ui pipeline train evaluate tensorboard mlflow-up mlflow-down mlflow-logs feast-apply feast-ui
 
 ui:
 	poetry run uvicorn ui.server:app --reload
 
 pipeline:
 	poetry run python data/pipeline.py --start $(START) --end $(END) $(if $(SYMBOL),--symbol $(SYMBOL),)
+
+train:
+	poetry run python env/train.py --timesteps $(if $(TIMESTEPS),$(TIMESTEPS),50000) $(if $(N_ENVS),--n-envs $(N_ENVS),) $(if $(SEED),--seed $(SEED),)
+
+evaluate:
+	poetry run python env/evaluate.py --run-id $(RUN_ID) $(if $(MODEL),--model $(MODEL),--random) $(if $(SPLIT),--split $(SPLIT),)
+
+tensorboard:
+	poetry run tensorboard --logdir logs/ppo_tensorboard
 
 mlflow-up:
 	docker compose -f docker-compose.mlflow.yml --env-file .env up -d --build

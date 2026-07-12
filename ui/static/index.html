@@ -36,11 +36,11 @@
   .layout-opt:hover { background: #f0f3fa; }
   .layout-opt.active { background: #e8f0fe; border-color: #2962ff; }
 
-  #source-select {
+  #source-select, #run-select {
     background: #ffffff; color: #5d606b; border: 1px solid #d1d4dc;
     border-radius: 4px; padding: 5px 10px; font-size: 13px; cursor: pointer;
   }
-  #source-select:hover { background: #f0f3fa; color: #131722; }
+  #source-select:hover, #run-select:hover { background: #f0f3fa; color: #131722; }
 
   /* settings picker */
   #settings-wrap { position: relative; }
@@ -95,6 +95,10 @@
       <option value="processed">processed</option>
     </select>
 
+    <select id="run-select" title="Training run (trade replay)">
+      <option value="">no run</option>
+    </select>
+
     <div id="settings-wrap">
       <button id="settings-btn" title="Chart settings">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
@@ -124,6 +128,10 @@
           <label>Indicators</label>
           <input type="checkbox" id="set-indicators" />
         </div>
+        <div class="setting-row">
+          <label>Trades</label>
+          <input type="checkbox" id="set-trades" />
+        </div>
       </div>
     </div>
 
@@ -151,9 +159,10 @@
     let availableTfs = TIMEFRAMES;
     let currentLayout = "1x1";
     let currentSource = localStorage.getItem("dataSource") || "raw";
+    let currentRun = "";
     let cells = []; // { chart, series, tfSelect, statusEl, ro }
 
-    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, indicators: false };
+    const DEFAULT_SETTINGS = { upColor: "#9575cd", downColor: "#000000", gridLines: true, precision: 5, indicators: false, trades: false };
     const OVERLAY_COLORS = {
       ema200: "#ff9800", ema50: "#2962ff", ema20: "#ab47bc", ema9: "#26a69a",
       bb_upper: "#787b86", bb_lower: "#787b86",
@@ -201,12 +210,14 @@
       const gridInput = document.getElementById("set-grid-lines");
       const precisionInput = document.getElementById("set-precision");
       const indicatorsInput = document.getElementById("set-indicators");
+      const tradesInput = document.getElementById("set-trades");
 
       upInput.value = chartSettings.upColor;
       downInput.value = chartSettings.downColor;
       gridInput.checked = chartSettings.gridLines;
       precisionInput.value = chartSettings.precision;
       indicatorsInput.checked = chartSettings.indicators;
+      tradesInput.checked = chartSettings.trades;
 
       upInput.oninput = () => { chartSettings.upColor = upInput.value; saveSettings(); applySettingsToAllCells(); };
       downInput.oninput = () => { chartSettings.downColor = downInput.value; saveSettings(); applySettingsToAllCells(); };
@@ -220,6 +231,11 @@
       };
       indicatorsInput.onchange = () => {
         chartSettings.indicators = indicatorsInput.checked;
+        saveSettings();
+        cells.forEach(loadCellMarkers);
+      };
+      tradesInput.onchange = () => {
+        chartSettings.trades = tradesInput.checked;
         saveSettings();
         cells.forEach(loadCellMarkers);
       };
@@ -394,7 +410,7 @@
 
       const cell = {
         chart, series, oscChart, oscHost, tfSelect, cellStatus, ro, oscRo,
-        overlaySeries: [], oscSeries: [],
+        overlaySeries: [], oscSeries: [], tradePrimitive: null,
       };
       tfSelect.onchange = () => loadCell(cell);
       loadCell(cell);
@@ -477,10 +493,91 @@
       if (hasOsc) cell.oscChart.timeScale().setVisibleLogicalRange(cell.chart.timeScale().getVisibleLogicalRange());
     }
 
+    async function fetchTrades() {
+      if (!chartSettings.trades || !currentRun) return [];
+      try {
+        const res = await fetch(`/api/runs/${currentRun}/trades`);
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.trades;
+      } catch (e) {
+        return [];
+      }
+    }
+
     async function loadCellMarkers(cell) {
       const tf = cell.tfSelect.value;
-      const indicatorData = await fetchIndicators(tf);
+      const [indicatorData, trades] = await Promise.all([fetchIndicators(tf), fetchTrades()]);
       applyIndicators(cell, indicatorData);
+
+      if (cell.tradePrimitive) {
+        cell.series.detachPrimitive(cell.tradePrimitive);
+        cell.tradePrimitive = null;
+      }
+      if (trades.length > 0) {
+        cell.tradePrimitive = new TradeBoxesPrimitive(trades);
+        cell.series.attachPrimitive(cell.tradePrimitive);
+      }
+    }
+
+    // ── Trade box primitive: outline rectangle per closed trade, entry->exit time, entry->exit price
+    class TradeBoxesPaneView {
+      constructor(source) { this._source = source; }
+      update() {}
+      renderer() {
+        const trades = this._source._trades;
+        const chart = this._source._chart;
+        const series = this._source._series;
+        const timeScale = chart.timeScale();
+        const boxes = trades.map(t => {
+          const x1 = timeScale.timeToCoordinate(t.entry_time);
+          const x2 = timeScale.timeToCoordinate(t.exit_time);
+          const yEntry = series.priceToCoordinate(t.entry_price);
+          const yExit = series.priceToCoordinate(t.exit_price);
+          if (x1 === null || x2 === null || yEntry === null || yExit === null) return null;
+          return { x1, x2, yEntry, yExit, color: t.pnl >= 0 ? "#26a69a" : "#ef5350" };
+        }).filter(b => b !== null);
+
+        return {
+          draw: (target) => {
+            target.useBitmapCoordinateSpace((scope) => {
+              const ctx = scope.context;
+              ctx.save();
+              ctx.scale(scope.horizontalPixelRatio, scope.verticalPixelRatio);
+              boxes.forEach(b => {
+                ctx.strokeStyle = b.color;
+                ctx.lineWidth = 1;
+                ctx.setLineDash([4, 3]);
+                const x = Math.min(b.x1, b.x2);
+                const w = Math.abs(b.x2 - b.x1);
+                const y = Math.min(b.yEntry, b.yExit);
+                const h = Math.abs(b.yExit - b.yEntry) || 1;
+                ctx.strokeRect(x, y, w, h);
+              });
+              ctx.restore();
+            });
+          },
+        };
+      }
+    }
+
+    class TradeBoxesPrimitive {
+      constructor(trades) {
+        this._trades = trades;
+        this._chart = null;
+        this._series = null;
+        this._paneView = new TradeBoxesPaneView(this);
+      }
+      attached({ chart, series }) {
+        this._chart = chart;
+        this._series = series;
+      }
+      detached() {
+        this._chart = null;
+        this._series = null;
+      }
+      updateAllViews() {}
+      paneViews() { return [this._paneView]; }
     }
 
     async function loadTimeframesAndBuildGrid() {
@@ -508,11 +605,32 @@
       };
     }
 
+    async function initRunSelect() {
+      const runSelect = document.getElementById("run-select");
+      try {
+        const res = await fetch("/api/runs");
+        const data = await res.json();
+        data.runs.forEach(r => {
+          const opt = document.createElement("option");
+          opt.value = r.run_id;
+          opt.textContent = `${r.run_id} (${r.n_trades} trades)`;
+          runSelect.appendChild(opt);
+        });
+      } catch (e) {
+        // no runs yet — leave just the "no run" option
+      }
+      runSelect.onchange = () => {
+        currentRun = runSelect.value;
+        cells.forEach(loadCellMarkers);
+      };
+    }
+
     async function init() {
       buildLayoutMenu();
       updateLayoutButtonIcon();
       initSettingsPanel();
       initSourceSelect();
+      await initRunSelect();
       await loadTimeframesAndBuildGrid();
     }
 
