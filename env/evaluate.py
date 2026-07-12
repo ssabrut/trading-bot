@@ -66,6 +66,8 @@ def save_run(run_id: str, symbol: str, split: str, equity_curve: list[dict], tra
             "exit_price": t["exit_price"],
             "side": t["side"],
             "size": t["size"],
+            "sl": t["sl"],
+            "tp": t["tp"],
             "pnl": t["pnl"],
             "reason": t["reason"],
         }

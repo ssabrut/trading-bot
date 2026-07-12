@@ -226,6 +226,8 @@ class MultiTimeframeTradingEnv(gym.Env):
                 "exit_price": price,
                 "side": pos.side,
                 "size": pos.size,
+                "sl": pos.sl,
+                "tp": pos.tp,
                 "pnl": pnl,
                 "reason": reason,
             }

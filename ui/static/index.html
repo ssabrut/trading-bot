@@ -36,11 +36,13 @@
   .layout-opt:hover { background: #f0f3fa; }
   .layout-opt.active { background: #e8f0fe; border-color: #2962ff; }
 
-  #source-select, #run-select {
+  #source-select, #run-select, #zoom-trades-btn {
     background: #ffffff; color: #5d606b; border: 1px solid #d1d4dc;
     border-radius: 4px; padding: 5px 10px; font-size: 13px; cursor: pointer;
   }
-  #source-select:hover, #run-select:hover { background: #f0f3fa; color: #131722; }
+  #source-select:hover, #run-select:hover, #zoom-trades-btn:hover { background: #f0f3fa; color: #131722; }
+  #zoom-trades-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  #zoom-trades-btn:disabled:hover { background: #ffffff; color: #5d606b; }
 
   /* settings picker */
   #settings-wrap { position: relative; }
@@ -98,6 +100,8 @@
     <select id="run-select" title="Training run (trade replay)">
       <option value="">no run</option>
     </select>
+
+    <button id="zoom-trades-btn" title="Zoom chart to this run's trade date range">Zoom to trades</button>
 
     <div id="settings-wrap">
       <button id="settings-btn" title="Chart settings">
@@ -515,13 +519,27 @@
         cell.tradePrimitive = null;
       }
       if (trades.length > 0) {
-        cell.tradePrimitive = new TradeBoxesPrimitive(trades);
+        cell.tradePrimitive = new TradeZonesPrimitive(trades);
         cell.series.attachPrimitive(cell.tradePrimitive);
       }
+      cell.trades = trades;
     }
 
-    // ── Trade box primitive: outline rectangle per closed trade, entry->exit time, entry->exit price
-    class TradeBoxesPaneView {
+    // ── Trade position primitive: TradingView-style long/short zones.
+    // Target zone = entry->TP, stop zone = entry->SL, dashed entry line, center P&L/qty/R:R label.
+    // Colors reuse the chart's own up/down candle colors so it stays consistent with the theme.
+    function hexToRgba(hex, alpha) {
+      const h = hex.replace("#", "");
+      const r = parseInt(h.length === 3 ? h[0] + h[0] : h.slice(0, 2), 16);
+      const g = parseInt(h.length === 3 ? h[1] + h[1] : h.slice(2, 4), 16);
+      const b = parseInt(h.length === 3 ? h[2] + h[2] : h.slice(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function pipDistance(a, b) { return Math.abs(a - b) * 10000; }
+    function pctDistance(a, b) { return (Math.abs(a - b) / a) * 100; }
+
+    class TradeZonesPaneView {
       constructor(source) { this._source = source; }
       update() {}
       renderer() {
@@ -529,14 +547,27 @@
         const chart = this._source._chart;
         const series = this._source._series;
         const timeScale = chart.timeScale();
-        const boxes = trades.map(t => {
+
+        const targetLine = chartSettings.upColor;
+        const stopLine = chartSettings.downColor;
+        const targetFill = hexToRgba(targetLine, 0.4);
+        const stopFill = hexToRgba(stopLine, 0.4);
+
+        const zones = trades.map(t => {
           const x1 = timeScale.timeToCoordinate(t.entry_time);
           const x2 = timeScale.timeToCoordinate(t.exit_time);
           const yEntry = series.priceToCoordinate(t.entry_price);
-          const yExit = series.priceToCoordinate(t.exit_price);
-          if (x1 === null || x2 === null || yEntry === null || yExit === null) return null;
-          return { x1, x2, yEntry, yExit, color: t.pnl >= 0 ? "#26a69a" : "#ef5350" };
-        }).filter(b => b !== null);
+          const yTp = series.priceToCoordinate(t.tp);
+          const ySl = series.priceToCoordinate(t.sl);
+          if (x1 === null || x2 === null || yEntry === null || yTp === null || ySl === null) return null;
+
+          const rr = pipDistance(t.entry_price, t.tp) / (pipDistance(t.entry_price, t.sl) || 1);
+          return {
+            x1, x2, yEntry, yTp, ySl,
+            side: t.side, pnl: t.pnl, qty: t.size, rr,
+            entryPrice: t.entry_price, tp: t.tp, sl: t.sl,
+          };
+        }).filter(z => z !== null);
 
         return {
           draw: (target) => {
@@ -544,16 +575,67 @@
               const ctx = scope.context;
               ctx.save();
               ctx.scale(scope.horizontalPixelRatio, scope.verticalPixelRatio);
-              boxes.forEach(b => {
-                ctx.strokeStyle = b.color;
+
+              zones.forEach(z => {
+                const x = Math.min(z.x1, z.x2);
+                const w = Math.abs(z.x2 - z.x1) || 1;
+
+                // target zone: entry -> TP
+                ctx.fillStyle = targetFill;
+                ctx.strokeStyle = targetLine;
                 ctx.lineWidth = 1;
-                ctx.setLineDash([4, 3]);
-                const x = Math.min(b.x1, b.x2);
-                const w = Math.abs(b.x2 - b.x1);
-                const y = Math.min(b.yEntry, b.yExit);
-                const h = Math.abs(b.yExit - b.yEntry) || 1;
-                ctx.strokeRect(x, y, w, h);
+                ctx.setLineDash([]);
+                const targetY = Math.min(z.yEntry, z.yTp);
+                const targetH = Math.abs(z.yTp - z.yEntry) || 1;
+                ctx.fillRect(x, targetY, w, targetH);
+                ctx.strokeRect(x, targetY, w, targetH);
+
+                // stop zone: entry -> SL
+                ctx.fillStyle = stopFill;
+                ctx.strokeStyle = stopLine;
+                const stopY = Math.min(z.yEntry, z.ySl);
+                const stopH = Math.abs(z.ySl - z.yEntry) || 1;
+                ctx.fillRect(x, stopY, w, stopH);
+                ctx.strokeRect(x, stopY, w, stopH);
+
+                // entry line
+                ctx.strokeStyle = "#787b86";
+                ctx.setLineDash([3, 3]);
+                ctx.lineWidth = 1;
+                ctx.beginPath();
+                ctx.moveTo(x, z.yEntry);
+                ctx.lineTo(x + w, z.yEntry);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // labels (only if zone wide enough to read)
+                if (w > 60) {
+                  ctx.font = "10px -apple-system, sans-serif";
+                  ctx.textBaseline = "middle";
+
+                  const sideLabel = z.side === 1 ? "LONG" : "SHORT";
+                  ctx.fillStyle = targetLine;
+                  ctx.textAlign = "left";
+                  ctx.fillText(
+                    `Target: ${z.tp.toFixed(5)} (${pctDistance(z.entryPrice, z.tp).toFixed(2)}% · ${pipDistance(z.entryPrice, z.tp).toFixed(1)}p)`,
+                    x + 4, targetY + 10
+                  );
+
+                  ctx.fillStyle = stopLine;
+                  ctx.fillText(
+                    `Stop: ${z.sl.toFixed(5)} (${pctDistance(z.entryPrice, z.sl).toFixed(2)}% · ${pipDistance(z.entryPrice, z.sl).toFixed(1)}p)`,
+                    x + 4, stopY + stopH - 10
+                  );
+
+                  ctx.fillStyle = z.pnl >= 0 ? targetLine : stopLine;
+                  ctx.textAlign = "center";
+                  ctx.fillText(
+                    `${sideLabel} · P&L: ${z.pnl >= 0 ? "+" : ""}${z.pnl.toFixed(2)} · Qty: ${Math.round(z.qty)} · R:R 1:${z.rr.toFixed(1)}`,
+                    x + w / 2, z.yEntry - 10
+                  );
+                }
               });
+
               ctx.restore();
             });
           },
@@ -561,12 +643,12 @@
       }
     }
 
-    class TradeBoxesPrimitive {
+    class TradeZonesPrimitive {
       constructor(trades) {
         this._trades = trades;
         this._chart = null;
         this._series = null;
-        this._paneView = new TradeBoxesPaneView(this);
+        this._paneView = new TradeZonesPaneView(this);
       }
       attached({ chart, series }) {
         this._chart = chart;
@@ -619,10 +701,25 @@
       } catch (e) {
         // no runs yet — leave just the "no run" option
       }
-      runSelect.onchange = () => {
+      runSelect.onchange = async () => {
         currentRun = runSelect.value;
-        cells.forEach(loadCellMarkers);
+        document.getElementById("zoom-trades-btn").disabled = !currentRun;
+        await Promise.all(cells.map(loadCellMarkers));
+        zoomToTrades();
       };
+      document.getElementById("zoom-trades-btn").disabled = !currentRun;
+      document.getElementById("zoom-trades-btn").onclick = zoomToTrades;
+    }
+
+    function zoomToTrades() {
+      cells.forEach(cell => {
+        const trades = cell.trades;
+        if (!trades || trades.length === 0) return;
+        const from = Math.min(...trades.map(t => t.entry_time));
+        const to = Math.max(...trades.map(t => t.exit_time));
+        const pad = Math.round((to - from) * 0.05) || 3600;
+        cell.chart.timeScale().setVisibleRange({ from: from - pad, to: to + pad });
+      });
     }
 
     async function init() {
