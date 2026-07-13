@@ -61,13 +61,25 @@ class MultiTimeframeTradingEnv(gym.Env):
         episode_days: int = EPISODE_DAYS_DEFAULT,
         initial_balance: float = 10_000.0,
         seed: int | None = None,
+        normalized_dir: Path | None = None,
+        date_range: tuple[pd.Timestamp, pd.Timestamp] | None = None,
     ):
+        """
+        normalized_dir: override for where <symbol>_<TF>_<split>.parquet normalized feature
+            files live — defaults to data/normalized/. Used by walk-forward to point at
+            fold-specific normalized data without touching the main pipeline's files.
+        date_range: (start, end) — if given, bars are filtered by this range instead of the
+            `split` column in data/processed/*.parquet. Used by walk-forward, where fold
+            boundaries don't match the fixed train/val/test split.
+        """
         super().__init__()
         assert split in ("train", "val", "test")
         self.split = split
         self.symbol = symbol
         self.episode_bars = episode_days * 96  # 96 M15 bars/day, 24h FX market
         self.initial_balance = initial_balance
+        self._normalized_dir = normalized_dir or DATA_NORMALIZED
+        self._date_range = date_range
 
         self._load_data()
 
@@ -92,7 +104,7 @@ class MultiTimeframeTradingEnv(gym.Env):
     def _load_data(self):
         # normalized features (agent input) — indexed by TF
         self.norm = {
-            tf: pd.read_parquet(DATA_NORMALIZED / f"{self.symbol}_{tf}_{self.split}.parquet")
+            tf: pd.read_parquet(self._normalized_dir / f"{self.symbol}_{tf}_{self.split}.parquet")
             for tf in TIMEFRAMES
         }
         # raw (unscaled) ATR and ADX — ATR needed for SL/TP distance in price units,
@@ -103,9 +115,13 @@ class MultiTimeframeTradingEnv(gym.Env):
             keep = ["datetime"] + [c for c in ("atr", "adx") if c in full.columns]
             if len(keep) > 1:
                 self.raw_feat[tf] = full[keep]
-        # raw OHLC + spread for execution, filtered to this split
+        # raw OHLC + spread for execution, filtered to this split (or explicit date_range for walk-forward)
         proc = pd.read_parquet(DATA_PROCESSED / f"{self.symbol}_M15.parquet")
-        self.bars = proc[proc["split"] == self.split].reset_index(drop=True)
+        if self._date_range is not None:
+            start, end = self._date_range
+            self.bars = proc[(proc["datetime"] >= start) & (proc["datetime"] < end)].reset_index(drop=True)
+        else:
+            self.bars = proc[proc["split"] == self.split].reset_index(drop=True)
 
         # precompute per-TF datetime numpy arrays for fast searchsorted as-of lookup
         self._dt = {tf: self.norm[tf]["datetime"].values for tf in TIMEFRAMES}

@@ -105,6 +105,24 @@ def compute_metrics(
     gross_profit = sum(wins)
     gross_loss = abs(sum(losses))
     profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else None
+    avg_rr = (avg_win / abs(avg_loss)) if avg_win is not None and avg_loss not in (None, 0) else None
+
+    max_win_streak = 0
+    max_lose_streak = 0
+    cur_win_streak = 0
+    cur_lose_streak = 0
+    for p in pnls:
+        if p > 0:
+            cur_win_streak += 1
+            cur_lose_streak = 0
+        elif p < 0:
+            cur_lose_streak += 1
+            cur_win_streak = 0
+        else:
+            cur_win_streak = 0
+            cur_lose_streak = 0
+        max_win_streak = max(max_win_streak, cur_win_streak)
+        max_lose_streak = max(max_lose_streak, cur_lose_streak)
 
     longs = [t for t in trades_serializable if t["side"] == 1]
     shorts = [t for t in trades_serializable if t["side"] == -1]
@@ -140,7 +158,10 @@ def compute_metrics(
             "win_rate_pct": round(win_rate_pct, 2) if win_rate_pct is not None else None,
             "avg_win": round(avg_win, 2) if avg_win is not None else None,
             "avg_loss": round(avg_loss, 2) if avg_loss is not None else None,
+            "avg_rr": round(avg_rr, 4) if avg_rr is not None else None,
             "profit_factor": round(profit_factor, 4) if profit_factor is not None else None,
+            "max_win_streak": max_win_streak,
+            "max_lose_streak": max_lose_streak,
             "n_long": len(longs),
             "n_short": len(shorts),
             "long_short_ratio": round(long_short_ratio, 4) if long_short_ratio is not None else None,
@@ -214,6 +235,8 @@ def save_run(
         f"return={metrics['return_risk']['total_return_pct']}% "
         f"max_dd={metrics['return_risk']['max_drawdown_pct']}% "
         f"win_rate={metrics['trade_stats']['win_rate_pct']}% "
+        f"avg_rr={metrics['trade_stats']['avg_rr']} "
+        f"streaks(w/l)={metrics['trade_stats']['max_win_streak']}/{metrics['trade_stats']['max_lose_streak']} "
         f"long/short={metrics['trade_stats']['n_long']}/{metrics['trade_stats']['n_short']}"
     )
     return out_dir

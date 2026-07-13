@@ -65,24 +65,42 @@ class MLflowCallback(BaseCallback):
         return True
 
 
-def make_env(split: str, seed: int):
+def make_env(split: str, seed: int, normalized_dir=None, date_range=None):
     def _init():
-        env = MultiTimeframeTradingEnv(split=split, seed=seed)
+        env = MultiTimeframeTradingEnv(
+            split=split, seed=seed, normalized_dir=normalized_dir, date_range=date_range,
+        )
         return Monitor(env)
     return _init
 
 
-def train(timesteps: int, n_envs: int, seed: int, ent_coef: float, learning_rate: float):
-    mlflow.set_experiment(MLFLOW_EXPERIMENT)  # tracking URI picked up from MLFLOW_TRACKING_URI env var
+def train(
+    timesteps: int,
+    n_envs: int,
+    seed: int,
+    ent_coef: float,
+    learning_rate: float,
+    run_tag: str | None = None,
+    normalized_dir=None,
+    train_date_range=None,
+    eval_date_range=None,
+    experiment: str = MLFLOW_EXPERIMENT,
+    extra_params: dict | None = None,
+):
+    mlflow.set_experiment(experiment)  # tracking URI picked up from MLFLOW_TRACKING_URI env var
 
-    run_tag = datetime.now().strftime("%Y%m%d_%H%M%S")  # sortable local name — MLflow's own run_id stays the uuid
+    run_tag = run_tag or datetime.now().strftime("%Y%m%d_%H%M%S")  # sortable local name — MLflow's own run_id stays the uuid
 
     vec_env = make_vec_env(
-        make_env("train", seed),
+        make_env("train", seed, normalized_dir=normalized_dir, date_range=train_date_range),
         n_envs=n_envs,
         seed=seed,
     )
-    eval_env = make_vec_env(make_env("val", seed), n_envs=1, seed=seed)
+    eval_env = make_vec_env(
+        make_env("val", seed, normalized_dir=normalized_dir, date_range=eval_date_range),
+        n_envs=1,
+        seed=seed,
+    )
 
     model = PPO(
         "MultiInputPolicy",
@@ -121,6 +139,7 @@ def train(timesteps: int, n_envs: int, seed: int, ent_coef: float, learning_rate
                 "feature_cols_d1": ",".join(FEATURE_COLS["D1"]),
                 "eval_freq": EVAL_FREQ,
                 "eval_episodes": EVAL_EPISODES,
+                **(extra_params or {}),
             }
         )
 
@@ -156,7 +175,7 @@ def train(timesteps: int, n_envs: int, seed: int, ent_coef: float, learning_rate
         if scaler_dir.exists():
             mlflow.log_artifacts(str(scaler_dir), artifact_path="scalers")
 
-        print(f"[MLFLOW] run_id={run_id}  run_tag={run_tag}  experiment={MLFLOW_EXPERIMENT}")
+        print(f"[MLFLOW] run_id={run_id}  run_tag={run_tag}  experiment={experiment}")
 
     return model, run_id, save_path
 

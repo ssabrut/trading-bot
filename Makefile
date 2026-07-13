@@ -1,4 +1,4 @@
-.PHONY: ui pipeline train evaluate tensorboard mlflow-up mlflow-down mlflow-logs feast-apply feast-ui
+.PHONY: ui pipeline train evaluate tensorboard walk-forward walk-forward-summary mlflow-up mlflow-down mlflow-logs feast-apply feast-ui
 
 ui:
 	poetry run uvicorn ui.server:app --reload
@@ -14,6 +14,12 @@ evaluate:
 
 tensorboard:
 	poetry run tensorboard --logdir logs/ppo_tensorboard
+
+walk-forward:
+	set -a && . .env && set +a && poetry run python env/walk_forward.py --fold $(FOLD) $(if $(TIMESTEPS),--timesteps $(TIMESTEPS),) $(if $(ENT_COEF),--ent-coef $(ENT_COEF),) $(if $(LR),--learning-rate $(LR),) $(if $(SEED),--seed $(SEED),)
+
+walk-forward-summary:
+	set -a && . .env && set +a && poetry run python env/walk_forward.py --summary
 
 mlflow-up:
 	docker compose -f docker-compose.mlflow.yml --env-file .env up -d --build
