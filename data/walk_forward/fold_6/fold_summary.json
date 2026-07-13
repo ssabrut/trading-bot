@@ -1,9 +1,0 @@
-{
-  "fold": 6,
-  "train_start": "2012-01-11",
-  "val_start": "2022-07-01",
-  "test_start": "2023-01-01",
-  "test_end": "2024-01-01",
-  "mlflow_run_id": "3dce45be5aeb476a96b35bf94894578a",
-  "run_id": "wf_fold6_wf_fold6_20260713_114452"
-}
