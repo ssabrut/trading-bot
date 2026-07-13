@@ -24,7 +24,11 @@ DATA_NORMALIZED = ROOT / "data" / "normalized"
 TIMEFRAMES = ["M15", "H1", "H4", "D1"]
 WINDOW = {"M15": 64, "H1": 24, "H4": 30, "D1": 20}
 FEATURE_COLS = {
-    "M15": ["ema9", "ema20", "ema_cross_up", "ema_cross_down", "rsi", "atr", "atr_pct", "bb_upper", "bb_lower", "bb_width", "bb_pct_b"],
+    "M15": [
+        "ema9", "ema20", "ema_cross_up", "ema_cross_down", "rsi", "atr", "atr_pct",
+        "bb_upper", "bb_lower", "bb_width", "bb_pct_b",
+        "session_asian", "session_london", "session_ny", "session_overlap", "hour_sin", "hour_cos",
+    ],
     "H1": ["ema20", "ema50", "ema_cross_up", "ema_cross_down", "rsi", "atr", "atr_pct"],
     "H4": ["ema20", "ema50", "ema_trend", "adx", "macd", "macd_signal", "macd_hist"],
     "D1": ["ema200", "ema50", "ema_regime", "adx", "atr", "atr_pct"],

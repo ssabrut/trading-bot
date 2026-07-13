@@ -44,6 +44,8 @@ SKIP_COLS = {
     "datetime",
     "ema_cross_up", "ema_cross_down",
     "ema_regime", "ema_trend",
+    "session_asian", "session_london", "session_ny", "session_overlap",
+    "hour_sin", "hour_cos",
 }
 
 
