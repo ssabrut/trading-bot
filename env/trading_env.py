@@ -38,6 +38,7 @@ RISK_PER_TRADE = 0.01  # fraction of equity risked per trade
 SPREAD_DEFAULT = 0.00015  # fallback spread (price units) if raw spread col is 0/missing
 EPISODE_DAYS_DEFAULT = 90
 IDLE_PENALTY = 0.00002  # per-step reward while flat — removes HOLD-forever as a zero-cost local optimum
+ADX_MIN_THRESHOLD = 15.0  # D1 ADX below this = weak-trend/choppy regime, ~15th pct of train — force HOLD
 
 
 @dataclass
@@ -94,12 +95,14 @@ class MultiTimeframeTradingEnv(gym.Env):
             tf: pd.read_parquet(DATA_NORMALIZED / f"{self.symbol}_{tf}_{self.split}.parquet")
             for tf in TIMEFRAMES
         }
-        # raw ATR (unscaled, price units) — needed for SL/TP distance
-        self.raw_feat = {
-            tf: pd.read_parquet(DATA_FEATURES / f"{self.symbol}_{tf}_features.parquet")[["datetime", "atr"]]
-            for tf in TIMEFRAMES
-            if "atr" in pd.read_parquet(DATA_FEATURES / f"{self.symbol}_{tf}_features.parquet").columns
-        }
+        # raw (unscaled) ATR and ADX — ATR needed for SL/TP distance in price units,
+        # ADX needed to gate trading during weak-trend/choppy regimes (see _regime_gate_active).
+        self.raw_feat = {}
+        for tf in TIMEFRAMES:
+            full = pd.read_parquet(DATA_FEATURES / f"{self.symbol}_{tf}_features.parquet")
+            keep = ["datetime"] + [c for c in ("atr", "adx") if c in full.columns]
+            if len(keep) > 1:
+                self.raw_feat[tf] = full[keep]
         # raw OHLC + spread for execution, filtered to this split
         proc = pd.read_parquet(DATA_PROCESSED / f"{self.symbol}_M15.parquet")
         self.bars = proc[proc["split"] == self.split].reset_index(drop=True)
@@ -134,13 +137,21 @@ class MultiTimeframeTradingEnv(gym.Env):
             return np.concatenate([pad, self._feat_arr[tf][: end + 1]], axis=0)
         return self._feat_arr[tf][start : end + 1]
 
-    def _raw_atr(self, tf: str, t: np.datetime64) -> float:
+    def _raw_feat_value(self, tf: str, col: str, t: np.datetime64) -> float:
         df = self.raw_feat[tf]
         dt = df["datetime"].values
         idx = np.searchsorted(dt, t, side="right") - 1
         if idx < 0:
-            return float(df["atr"].iloc[0])
-        return float(df["atr"].iloc[idx])
+            idx = 0
+        return float(df[col].iloc[idx])
+
+    def _raw_atr(self, tf: str, t: np.datetime64) -> float:
+        return self._raw_feat_value(tf, "atr", t)
+
+    def _regime_gate_active(self, t: np.datetime64) -> bool:
+        """True when D1 ADX is below threshold — weak-trend/choppy regime, don't force a directional bet."""
+        d1_adx = self._raw_feat_value("D1", "adx", t)
+        return d1_adx < ADX_MIN_THRESHOLD
 
     def _get_obs(self) -> dict:
         t = self._bars_dt[self.cursor]
@@ -265,6 +276,10 @@ class MultiTimeframeTradingEnv(gym.Env):
 
         realized = self._check_sl_tp()
 
+        regime_gated = self.position is None and self._regime_gate_active(self._bars_dt[self.cursor])
+        if regime_gated:
+            action = HOLD  # weak-trend/choppy D1 regime — don't force a directional bet
+
         if action == BUY and self.position is None:
             self._open_position(1)
         elif action == SELL and self.position is None:
@@ -283,7 +298,7 @@ class MultiTimeframeTradingEnv(gym.Env):
         self.peak_equity = max(self.peak_equity, equity_after)
 
         reward = (equity_after - equity_before) / self.initial_balance
-        if self.position is None:
+        if self.position is None and not regime_gated:
             reward -= IDLE_PENALTY
 
         obs = self._get_obs()

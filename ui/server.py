@@ -165,4 +165,12 @@ def get_run_trades(run_id: str):
     return {"run_id": run_id, "trades": json.loads(path.read_text())}
 
 
+@app.get("/api/runs/{run_id}/metrics")
+def get_run_metrics(run_id: str):
+    path = RUNS_DIR / run_id / "metrics.json"
+    if not path.exists():
+        raise HTTPException(404, f"No metrics for '{run_id}'. Re-run env/evaluate.py to generate metrics.json.")
+    return {"run_id": run_id, "metrics": json.loads(path.read_text())}
+
+
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

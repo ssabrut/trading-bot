@@ -1,0 +1,39 @@
+{
+  "return_risk": {
+    "total_return_pct": 5.125,
+    "annualized_return_pct": 22.4702,
+    "sharpe_ratio": 0.6857,
+    "sortino_ratio": 0.7964,
+    "max_drawdown_pct": -31.8341,
+    "final_equity": 10512.5,
+    "initial_balance": 10000.0
+  },
+  "trade_stats": {
+    "n_trades": 624,
+    "win_rate_pct": 33.97,
+    "avg_win": 188.61,
+    "avg_loss": -95.81,
+    "profit_factor": 1.013,
+    "n_long": 590,
+    "n_short": 34,
+    "long_short_ratio": 17.3529,
+    "long_win_rate_pct": 34.41,
+    "short_win_rate_pct": 26.47,
+    "exit_reason_counts": {
+      "sl": 412,
+      "tp": 211,
+      "episode_end": 1
+    }
+  },
+  "exposure": {
+    "span_days": 127.5,
+    "trades_per_day": 4.8941,
+    "avg_hold_minutes": 266.37,
+    "pct_time_in_market": 90.53
+  },
+  "regime": {
+    "total_steps": 8640,
+    "gated_steps": 556,
+    "pct_steps_gated": 6.44
+  }
+}
