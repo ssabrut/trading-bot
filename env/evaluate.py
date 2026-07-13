@@ -90,13 +90,14 @@ def save_run(run_id: str, symbol: str, split: str, equity_curve: list[dict], tra
     return out_dir
 
 
-def load_model_from_mlflow(mlflow_run_id: str):
+def load_model_from_mlflow(mlflow_run_id: str, best: bool = False):
     from stable_baselines3 import PPO
 
-    local_dir = mlflow.artifacts.download_artifacts(run_id=mlflow_run_id, artifact_path="model")
+    artifact_path = "model_best_val" if best else "model"
+    local_dir = mlflow.artifacts.download_artifacts(run_id=mlflow_run_id, artifact_path=artifact_path)
     zips = list(Path(local_dir).glob("*.zip"))
     if not zips:
-        raise FileNotFoundError(f"No model .zip found in MLflow run {mlflow_run_id} artifact_path='model'")
+        raise FileNotFoundError(f"No model .zip found in MLflow run {mlflow_run_id} artifact_path='{artifact_path}'")
     return PPO.load(zips[0])
 
 
@@ -104,6 +105,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", type=str, default=None, help="Path to trained SB3 model .zip")
     parser.add_argument("--mlflow-run-id", type=str, default=None, help="Pull model artifact from this MLflow run instead")
+    parser.add_argument("--best", action="store_true", help="With --mlflow-run-id: pull the best-on-val checkpoint (model_best_val) instead of the final model")
     parser.add_argument("--random", action="store_true", help="Use random policy (no model needed)")
     parser.add_argument("--split", type=str, default="val", choices=["train", "val", "test"])
     parser.add_argument("--symbol", type=str, default="GBPUSD")
@@ -121,7 +123,7 @@ if __name__ == "__main__":
 
     model = None
     if args.mlflow_run_id:
-        model = load_model_from_mlflow(args.mlflow_run_id)
+        model = load_model_from_mlflow(args.mlflow_run_id, best=args.best)
     elif args.model:
         from stable_baselines3 import PPO
         model = PPO.load(args.model)
