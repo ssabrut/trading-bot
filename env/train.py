@@ -69,7 +69,7 @@ def make_env(split: str, seed: int):
     return _init
 
 
-def train(timesteps: int, n_envs: int, seed: int, ent_coef: float):
+def train(timesteps: int, n_envs: int, seed: int, ent_coef: float, learning_rate: float):
     mlflow.set_experiment(MLFLOW_EXPERIMENT)  # tracking URI picked up from MLFLOW_TRACKING_URI env var
 
     run_tag = datetime.now().strftime("%Y%m%d_%H%M%S")  # sortable local name — MLflow's own run_id stays the uuid
@@ -86,6 +86,7 @@ def train(timesteps: int, n_envs: int, seed: int, ent_coef: float):
         verbose=1,
         seed=seed,
         ent_coef=ent_coef,
+        learning_rate=learning_rate,
         tensorboard_log=str(LOGS_DIR / "ppo_tensorboard"),
     )
 
@@ -99,6 +100,7 @@ def train(timesteps: int, n_envs: int, seed: int, ent_coef: float):
                 "n_envs": n_envs,
                 "seed": seed,
                 "ent_coef": ent_coef,
+                "learning_rate": learning_rate,
                 "episode_days": EPISODE_DAYS_DEFAULT,
                 "sl_atr_mult": SL_ATR_MULT,
                 "tp_atr_mult": TP_ATR_MULT,
@@ -138,6 +140,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-envs", type=int, default=1)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--ent-coef", type=float, default=0.0)
+    parser.add_argument("--learning-rate", type=float, default=3e-4, help="SB3 PPO default is 3e-4; lower (1e-4–2e-4) slows convergence and reduces overfitting on long runs")
     args = parser.parse_args()
 
-    train(args.timesteps, args.n_envs, args.seed, args.ent_coef)
+    train(args.timesteps, args.n_envs, args.seed, args.ent_coef, args.learning_rate)
