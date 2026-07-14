@@ -31,7 +31,7 @@ FEATURE_COLS = {
     ],
     "H1": ["ema20", "ema50", "ema_cross_up", "ema_cross_down", "rsi", "atr", "atr_pct"],
     "H4": ["ema20", "ema50", "ema_trend", "adx", "macd", "macd_signal", "macd_hist"],
-    "D1": ["ema200", "ema50", "ema_regime", "adx", "atr", "atr_pct"],
+    "D1": ["ema200", "ema50", "ema_regime", "adx", "atr", "atr_pct", "kumo_thickness", "price_vs_kumo_top"],
 }
 
 HOLD, BUY, SELL = 0, 1, 2
@@ -54,6 +54,7 @@ class Position:
     size: float  # units of base currency
     sl: float
     tp: float
+    mfe_price: float = 0.0  # best price reached so far (most favorable), init'd to entry_price on open
 
 
 class MultiTimeframeTradingEnv(gym.Env):
@@ -222,6 +223,7 @@ class MultiTimeframeTradingEnv(gym.Env):
         self.peak_equity = self.initial_balance
         self.position: Position | None = None
         self.trade_log: list[dict] = []
+        self._last_close_mfe_fraction: float | None = None
 
         obs = self._get_obs()
         info = {}
@@ -242,7 +244,7 @@ class MultiTimeframeTradingEnv(gym.Env):
         tp = price + side * tp_dist
         self.position = Position(
             side=side, entry_price=price, entry_time=self._bars_dt[self.cursor],
-            size=size, sl=sl, tp=tp,
+            size=size, sl=sl, tp=tp, mfe_price=price,
         )
 
     def _close_position(self, price: float | None = None, reason: str = "manual"):
@@ -252,6 +254,12 @@ class MultiTimeframeTradingEnv(gym.Env):
         pnl = self._unrealized_pnl(price)
         self.balance += pnl
         pos = self.position
+
+        tp_dist = abs(pos.tp - pos.entry_price)
+        mfe_dist = pos.side * (pos.mfe_price - pos.entry_price)  # positive = favorable
+        mfe_fraction = max(0.0, mfe_dist / tp_dist) if tp_dist > 0 else 0.0
+        self._last_close_mfe_fraction = mfe_fraction
+
         self.trade_log.append(
             {
                 "entry_time": pos.entry_time,
@@ -264,6 +272,7 @@ class MultiTimeframeTradingEnv(gym.Env):
                 "tp": pos.tp,
                 "pnl": pnl,
                 "reason": reason,
+                "mfe_fraction": round(mfe_fraction, 4),
             }
         )
         self.position = None
@@ -276,6 +285,12 @@ class MultiTimeframeTradingEnv(gym.Env):
         high = float(self.bars["high"].iloc[self.cursor])
         low = float(self.bars["low"].iloc[self.cursor])
         pos = self.position
+
+        # track most-favorable-excursion using intra-bar high/low, before checking SL/TP
+        if pos.side == 1:
+            pos.mfe_price = max(pos.mfe_price, high)
+        else:
+            pos.mfe_price = min(pos.mfe_price, low)
 
         if pos.side == 1:
             hit_sl = low <= pos.sl

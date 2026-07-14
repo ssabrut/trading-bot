@@ -210,6 +210,7 @@ def save_run(
             "tp": t["tp"],
             "pnl": t["pnl"],
             "reason": t["reason"],
+            "mfe_fraction": t.get("mfe_fraction"),
         }
         for t in trade_log
     ]
