@@ -173,6 +173,7 @@ def run_fold(fold: int, timesteps: int, ent_coef: float, learning_rate: float, s
 
 def summarize():
     rows = []
+    running_equity = None  # compounds fold-to-fold, as if traded continuously across all years
     for fold in range(1, len(FOLD_TEST_START_YEARS) + 1):
         summary_path = fold_dir(fold) / "fold_summary.json"
         if not summary_path.exists():
@@ -182,6 +183,16 @@ def summarize():
         if not metrics_path.exists():
             continue
         metrics = json.loads(metrics_path.read_text())
+
+        start_equity = metrics["return_risk"]["initial_balance"]
+        end_equity = metrics["return_risk"]["final_equity"]
+        fold_return_frac = (end_equity - start_equity) / start_equity
+
+        if running_equity is None:
+            running_equity = start_equity
+        running_equity_start = running_equity
+        running_equity *= 1 + fold_return_frac  # apply this fold's % return to the running balance
+
         rows.append(
             {
                 "fold": fold,
@@ -193,6 +204,10 @@ def summarize():
                 "n_trades": metrics["trade_stats"]["n_trades"],
                 "n_long": metrics["trade_stats"]["n_long"],
                 "n_short": metrics["trade_stats"]["n_short"],
+                "start_equity": round(start_equity, 2),
+                "end_equity": round(end_equity, 2),
+                "running_equity_start": round(running_equity_start, 2),
+                "running_equity_end": round(running_equity, 2),
             }
         )
 
@@ -205,6 +220,16 @@ def summarize():
     print()
     print("Aggregate (mean across folds):")
     print(df[["sharpe", "total_return_pct", "max_drawdown_pct", "win_rate_pct"]].mean())
+    print()
+    n_years = len(df)
+    start_eq = df['running_equity_start'].iloc[0]
+    end_eq = df['running_equity_end'].iloc[-1]
+    total_compounded_return = (end_eq / start_eq - 1) * 100
+    cagr = ((end_eq / start_eq) ** (1 / n_years) - 1) * 100 if start_eq > 0 else None
+    print(f"Compounded equity if traded continuously across all folds' years:")
+    print(f"  start: {start_eq:.2f}  ->  end: {end_eq:.2f}")
+    print(f"  total compounded return: {total_compounded_return:+.2f}%  over {n_years} years")
+    print(f"  CAGR (compound annual growth rate): {cagr:+.2f}%/yr" if cagr is not None else "  CAGR: n/a")
 
     (WF_DIR / "summary.json").write_text(df.to_json(orient="records", indent=2))
     print(f"\n[SAVE] {WF_DIR / 'summary.json'}")

@@ -1,4 +1,4 @@
-.PHONY: ui pipeline train evaluate tensorboard walk-forward walk-forward-all walk-forward-summary mlflow-up mlflow-down mlflow-logs feast-apply feast-ui
+.PHONY: ui pipeline train evaluate tensorboard walk-forward walk-forward-all walk-forward-summary multi-seed mlflow-up mlflow-down mlflow-logs feast-apply feast-ui
 
 ui:
 	poetry run uvicorn ui.server:app --reload
@@ -29,6 +29,9 @@ walk-forward-all:
 
 walk-forward-summary:
 	set -a && . .env && set +a && poetry run python env/walk_forward.py --summary
+
+multi-seed:
+	set -a && . .env && set +a && poetry run python env/multi_seed.py --seeds $(if $(SEEDS),$(SEEDS),42,123,7) $(if $(TIMESTEPS),--timesteps $(TIMESTEPS),) $(if $(ENT_COEF),--ent-coef $(ENT_COEF),) $(if $(LR),--learning-rate $(LR),) $(if $(BATCH_TAG),--batch-tag $(BATCH_TAG),)
 
 mlflow-up:
 	docker compose -f docker-compose.mlflow.yml --env-file .env up -d --build
