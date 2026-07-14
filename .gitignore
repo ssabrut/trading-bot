@@ -105,3 +105,10 @@ data/runs/
 data/walk_forward/
 data/multi_seed
 models/
+
+# Large raw data files (exceed GitHub's 100MB limit)
+data/raw/NAS100_M1.parquet
+data/raw/NAS100_M15.parquet
+data/raw/NAS100_H1.parquet
+data/raw/NAS100_H4.parquet
+data/raw/NAS100_D1.parquet
