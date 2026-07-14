@@ -1,4 +1,4 @@
-.PHONY: ui pipeline train evaluate tensorboard walk-forward walk-forward-summary mlflow-up mlflow-down mlflow-logs feast-apply feast-ui
+.PHONY: ui pipeline train evaluate tensorboard walk-forward walk-forward-all walk-forward-summary mlflow-up mlflow-down mlflow-logs feast-apply feast-ui
 
 ui:
 	poetry run uvicorn ui.server:app --reload
@@ -17,6 +17,15 @@ tensorboard:
 
 walk-forward:
 	set -a && . .env && set +a && poetry run python env/walk_forward.py --fold $(FOLD) $(if $(TIMESTEPS),--timesteps $(TIMESTEPS),) $(if $(ENT_COEF),--ent-coef $(ENT_COEF),) $(if $(LR),--learning-rate $(LR),) $(if $(SEED),--seed $(SEED),)
+
+walk-forward-all:
+	set -a && . .env && set +a && \
+	N_FOLDS=$$(poetry run python -c "from env.walk_forward import FOLD_TEST_START_YEARS; print(len(FOLD_TEST_START_YEARS))") && \
+	for i in $$(seq 1 $$N_FOLDS); do \
+		echo "=== walk-forward fold $$i / $$N_FOLDS ==="; \
+		poetry run python env/walk_forward.py --fold $$i $(if $(TIMESTEPS),--timesteps $(TIMESTEPS),) $(if $(ENT_COEF),--ent-coef $(ENT_COEF),) $(if $(LR),--learning-rate $(LR),) $(if $(SEED),--seed $(SEED),) || exit 1; \
+	done && \
+	poetry run python env/walk_forward.py --summary
 
 walk-forward-summary:
 	set -a && . .env && set +a && poetry run python env/walk_forward.py --summary

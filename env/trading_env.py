@@ -43,6 +43,7 @@ SPREAD_DEFAULT = 0.00015  # fallback spread (price units) if raw spread col is 0
 EPISODE_DAYS_DEFAULT = 90
 IDLE_PENALTY = 0.00002  # per-step reward while flat — removes HOLD-forever as a zero-cost local optimum
 ADX_MIN_THRESHOLD = 15.0  # D1 ADX below this = weak-trend/choppy regime, ~15th pct of train — force HOLD
+DOWNSIDE_PENALTY_COEF = 20.0  # convex penalty on negative-return steps (semi-variance style) — punishes large losing steps disproportionately more than typical ones
 
 
 @dataclass
@@ -318,6 +319,16 @@ class MultiTimeframeTradingEnv(gym.Env):
         self.peak_equity = max(self.peak_equity, equity_after)
 
         reward = (equity_after - equity_before) / self.initial_balance
+
+        # convex penalty on losing trade CLOSES only (not every mark-to-market step) — the
+        # agent can't act mid-trade (no CLOSE action, rides to SL/TP), so penalizing every
+        # negative unrealized step just added noise to steps with no counterfactual action.
+        # Applying it once, tied to the realized outcome of the entry decision, targets the
+        # thing the agent actually controls.
+        if realized < 0:
+            realized_pct = realized / self.initial_balance
+            reward -= DOWNSIDE_PENALTY_COEF * realized_pct**2
+
         if self.position is None and not regime_gated:
             reward -= IDLE_PENALTY
 

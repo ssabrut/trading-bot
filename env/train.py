@@ -29,6 +29,7 @@ from stable_baselines3.common.monitor import Monitor
 from config.settings import ROOT
 from env.trading_env import (
     ADX_MIN_THRESHOLD,
+    DOWNSIDE_PENALTY_COEF,
     EPISODE_DAYS_DEFAULT,
     FEATURE_COLS,
     IDLE_PENALTY,
@@ -128,6 +129,7 @@ def train(
                 "tp_atr_mult": TP_ATR_MULT,
                 "risk_per_trade": RISK_PER_TRADE,
                 "idle_penalty": IDLE_PENALTY,
+                "downside_penalty_coef": DOWNSIDE_PENALTY_COEF,
                 "adx_min_threshold": ADX_MIN_THRESHOLD,
                 "window_m15": WINDOW["M15"],
                 "window_h1": WINDOW["H1"],

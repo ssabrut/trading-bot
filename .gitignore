@@ -100,3 +100,7 @@ secrets.yml
 .secrets/
 *.key
 *.pem
+
+data/runs/
+data/walk_forward/
+models/
